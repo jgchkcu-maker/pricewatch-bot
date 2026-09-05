@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from pricewatch.marketplaces import (
     MarketplaceOfferAdapter,
     OfferIdentityError,
@@ -7,10 +9,23 @@ from pricewatch.marketplaces import (
     OfferSnapshot,
     SearchCandidate,
 )
-from pricewatch.match_learning import HybridMatchEngine, LearningEvidenceSource
+from pricewatch.match_learning import (
+    HybridMatchEngine,
+    LearningEvidence,
+    LearningEvidenceSource,
+)
 from pricewatch.matching import MatchStatus, match_candidate
 from pricewatch.search_plan import SearchPlan
 from pricewatch.taxonomy import TaxonomyGateStatus, TaxonomyObservationAccumulator
+
+
+class VerifiedLearningStore(Protocol):
+    async def save_verified_update(
+        self,
+        scope_key: str,
+        engine: HybridMatchEngine,
+        evidence: LearningEvidence,
+    ) -> None: ...
 
 
 def candidate_locator(candidate: SearchCandidate) -> OfferLocator:
@@ -31,6 +46,8 @@ async def verify_candidate(
     match_engine: HybridMatchEngine | None = None,
     source_queries: tuple[str, ...] = (),
     taxonomy_observations: TaxonomyObservationAccumulator | None = None,
+    learning_store: VerifiedLearningStore | None = None,
+    learning_scope_key: str | None = None,
 ) -> OfferSnapshot:
     """Fetch the concrete offer, recheck identity, and learn only from verified evidence.
 
@@ -40,6 +57,10 @@ async def verify_candidate(
     """
     if candidate.marketplace != adapter.marketplace:
         raise ValueError("candidate marketplace does not match verification adapter")
+    if (learning_store is None) != (learning_scope_key is None):
+        raise ValueError("learning_store and learning_scope_key must be provided together")
+    if learning_scope_key is not None and not learning_scope_key.strip():
+        raise ValueError("learning_scope_key must not be empty")
 
     engine = match_engine or HybridMatchEngine()
     snapshot = await adapter.fetch_offer(candidate_locator(candidate))
@@ -92,6 +113,14 @@ async def verify_candidate(
     else:
         raise OfferIdentityError(
             "offer verification failed product identity recheck: detail evidence is ambiguous"
+        )
+
+    evidence = engine.evidence[-1]
+    if learning_store is not None and learning_scope_key is not None:
+        await learning_store.save_verified_update(
+            learning_scope_key,
+            engine,
+            evidence,
         )
 
     if not matched:
