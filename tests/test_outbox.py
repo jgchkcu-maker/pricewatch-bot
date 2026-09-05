@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from pricewatch.outbox import OutboxDispatcher, OutboxItem, PostgresOutboxStore
 from pricewatch.telegram_api import TelegramApiError, TelegramPermanentError, TelegramRateLimitError
@@ -37,9 +37,7 @@ class FakeConnection:
         self.calls.append((query, params))
         normalized = " ".join(query.lower().split())
         if "from notification_outbox" in normalized and "skip locked" in normalized:
-            return FakeCursor(
-                rows=[(9, 11, 70, 42, "new_low", PAYLOAD, 0)]
-            )
+            return FakeCursor(rows=[(9, 11, 70, 42, "new_low", PAYLOAD, 0)])
         return FakeCursor()
 
     async def commit(self) -> None:
@@ -55,7 +53,7 @@ class FakeFactory:
         yield self.connection
 
 
-def test_postgres_outbox_claim_uses_skip_locked_and_marks_claim() -> None:
+def test_postgres_outbox_claim_uses_skip_locked_and_claim_timeout() -> None:
     connection = FakeConnection()
     store = PostgresOutboxStore(FakeFactory(connection))
 
@@ -66,7 +64,53 @@ def test_postgres_outbox_claim_uses_skip_locked_and_marks_claim() -> None:
     sql = "\n".join(query for query, _ in connection.calls).lower()
     assert "for update skip locked" in sql
     assert "claimed_until" in sql
+    assert "claimed_until is null or claimed_until <= %s" in sql
     assert connection.commits == 1
+
+
+def test_postgres_retry_uses_bounded_exponential_delay() -> None:
+    connection = FakeConnection()
+    store = PostgresOutboxStore(FakeFactory(connection))
+    item = OutboxItem(
+        id=9,
+        user_id=11,
+        subscription_id=70,
+        tracked_product_id=42,
+        notification_type="new_low",
+        payload=PAYLOAD,
+        attempt_count=99,
+    )
+
+    asyncio.run(store.mark_retry(item, now=NOW, error="temporary"))
+
+    retry_calls = [
+        params
+        for query, params in connection.calls
+        if "set attempt_count = attempt_count + 1" in query.lower()
+    ]
+    assert retry_calls == [(NOW + timedelta(seconds=3600), "temporary", 9)]
+
+
+def test_blocked_chat_disables_delivery_without_disabling_tracking() -> None:
+    connection = FakeConnection()
+    store = PostgresOutboxStore(FakeFactory(connection))
+    item = OutboxItem(
+        id=9,
+        user_id=11,
+        subscription_id=70,
+        tracked_product_id=42,
+        notification_type="new_low",
+        payload=PAYLOAD,
+        attempt_count=0,
+    )
+
+    asyncio.run(store.mark_permanent_failure(item, error="bot was blocked"))
+
+    sql = "\n".join(query for query, _ in connection.calls).lower()
+    assert "update telegram_user" in sql
+    assert "delivery_enabled = false" in sql
+    assert "update subscription" not in sql
+    assert "update tracked_product" not in sql
 
 
 class MemoryStore:
