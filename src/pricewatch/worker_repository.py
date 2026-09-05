@@ -117,7 +117,7 @@ class PostgresWorkerRepository:
             await connection.commit()
         return products
 
-    async def known_listings(
+    async def list_known_candidates(
         self,
         product_id: int,
         marketplace: str,
