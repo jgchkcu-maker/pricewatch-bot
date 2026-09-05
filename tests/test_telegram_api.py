@@ -2,6 +2,7 @@ import asyncio
 import json
 
 import httpx
+
 from pricewatch.telegram_api import (
     TelegramApiError,
     TelegramClient,
