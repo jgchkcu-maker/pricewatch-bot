@@ -87,10 +87,11 @@ def match_candidate(plan: SearchPlan, candidate: SearchCandidate) -> MatchDecisi
         actual = attributes.get(key)
         if actual is not None:
             if _compact(actual) != _compact(expected_normalized):
-                return MatchDecision(
-                    MatchStatus.REJECT,
-                    f"identity attribute contradiction for {key}: {actual} != {expected_normalized}",
+                reason = (
+                    f"identity attribute contradiction for {key}: "
+                    f"{actual} != {expected_normalized}"
                 )
+                return MatchDecision(MatchStatus.REJECT, reason)
             continue
 
         if not _value_present(combined, expected_normalized):
