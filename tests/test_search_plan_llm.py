@@ -17,6 +17,12 @@ def test_prompt_is_strict_about_universal_identity_and_query_spam() -> None:
     assert "word-order permutations" in prompt
     assert "region" in prompt
     assert "identity_attributes" in prompt
+    assert "brand" in prompt
+    assert "gtin" in prompt
+    assert "ean" in prompt
+    assert "upc" in prompt
+    assert "mpn" in prompt
+    assert "preserve" in prompt
     assert "7 aliases" in prompt
     assert DEFAULT_SEARCH_PLAN_MODEL == "gemini-3.5-flash-lite"
 
