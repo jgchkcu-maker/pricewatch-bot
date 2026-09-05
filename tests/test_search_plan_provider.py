@@ -70,7 +70,7 @@ def test_gemini_provider_uses_system_instruction_json_mode_and_parses_plan() -> 
     plan = asyncio.run(provider.create_plan("Xiaomi Pad 7 8/256"))
     asyncio.run(client.aclose())
 
-    assert plan.identity_attributes["storage"] == "256 GB"
+    assert plan.identity_attributes["storage"] == "256 gb"
     assert "gemini-3.5-flash-lite:generateContent" in str(captured["url"])
     assert captured["key"] == "secret"
     payload = captured["payload"]
