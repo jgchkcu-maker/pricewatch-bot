@@ -59,7 +59,7 @@ def _taxonomy_from_json(value: object) -> MarketplaceTaxonomy | None:
 
 
 class PostgresWorkerRepository:
-    """Worker-facing PostgreSQL operations: due claims, known listings, leases and taxonomy evidence."""
+    """Worker-facing PostgreSQL operations for claims, listings and taxonomy evidence."""
 
     def __init__(self, connection_factory: ConnectionFactory) -> None:
         self._connection_factory = connection_factory
