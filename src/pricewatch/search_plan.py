@@ -59,16 +59,29 @@ class SearchPlan:
         object.__setattr__(self, "identity_attributes", identity_attributes)
 
 
-def query_for_cycle(plan: SearchPlan, cycle: int) -> str:
-    """Return the query for a scan cycle.
+def queries_for_cycle(
+    plan: SearchPlan,
+    cycle: int,
+    *,
+    alias_every_cycles: int = 2,
+) -> tuple[str, ...]:
+    """Return fast-discovery queries for one monitoring cycle.
 
-    Even cycles always use the primary query. Odd cycles rotate through aliases,
-    which gives the core query at least half of all scans while still expanding
-    recall over time.
+    The primary query is always executed, preserving the four-minute freshness
+    target. One alias is added periodically and rotated round-robin. Full alias
+    sweeps belong to the slower deep-discovery job rather than the hot path.
     """
     if cycle < 0:
         raise ValueError("cycle must be non-negative")
-    if cycle % 2 == 0 or not plan.aliases:
-        return plan.primary_query
-    alias_index = ((cycle - 1) // 2) % len(plan.aliases)
-    return plan.aliases[alias_index]
+    if alias_every_cycles <= 0:
+        raise ValueError("alias_every_cycles must be positive")
+
+    queries = [plan.primary_query]
+    if not plan.aliases or (cycle + 1) % alias_every_cycles != 0:
+        return tuple(queries)
+
+    alias_slot = (cycle + 1) // alias_every_cycles - 1
+    alias = plan.aliases[alias_slot % len(plan.aliases)]
+    if alias != plan.primary_query:
+        queries.append(alias)
+    return tuple(queries)
