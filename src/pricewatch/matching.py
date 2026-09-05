@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.search_plan import SearchPlan, normalize_query
+
+_UNIT_PATTERNS = (
+    (r"(\d+(?:[.,]\d+)?)\s*(?:гб|gb|гигабайт(?:а|ов)?)\b", r"\1 gb"),
+    (r"(\d+(?:[.,]\d+)?)\s*(?:тб|tb|терабайт(?:а|ов)?)\b", r"\1 tb"),
+    (r"(\d+(?:[.,]\d+)?)\s*(?:мб|mb|мегабайт(?:а|ов)?)\b", r"\1 mb"),
+)
 
 
 class MatchStatus(StrEnum):
@@ -19,6 +26,13 @@ class MatchDecision:
     reason: str
 
 
+def _canonical_text(text: str) -> str:
+    value = normalize_query(text)
+    for pattern, replacement in _UNIT_PATTERNS:
+        value = re.sub(pattern, replacement, value)
+    return " ".join(value.split())
+
+
 def _phrase_present(haystack: str, needle: str) -> bool:
     return f" {needle} " in f" {haystack} "
 
@@ -28,23 +42,38 @@ def _compact(text: str) -> str:
 
 
 def _value_present(text: str, value: str) -> bool:
-    return _phrase_present(text, value) or _compact(value) in _compact(text)
+    haystack = _canonical_text(text)
+    needle = _canonical_text(value)
+    return _phrase_present(haystack, needle) or _compact(needle) in _compact(haystack)
+
+
+def _excluded_present(text: str, expression: str) -> bool:
+    haystack = _canonical_text(text)
+    needle = _canonical_text(expression)
+    if _phrase_present(haystack, needle):
+        return True
+    # Compact matching is useful for multi-token model names such as
+    # ``Pad 7 Pro`` vs ``Pad7 Pro``, but unsafe for short single words like
+    # ``case`` because they can occur inside unrelated words.
+    return " " in needle and _compact(needle) in _compact(haystack)
 
 
 def match_candidate(plan: SearchPlan, candidate: SearchCandidate) -> MatchDecision:
-    title = normalize_query(candidate.title)
+    title = _canonical_text(candidate.title)
     attributes = {
-        normalize_query(key): normalize_query(value)
+        normalize_query(key): _canonical_text(value)
         for key, value in candidate.attributes.items()
     }
     combined = " ".join(part for part in (title, *attributes.values()) if part)
 
     for excluded in plan.excluded_terms:
-        if _phrase_present(combined, excluded):
+        if _excluded_present(combined, excluded):
             return MatchDecision(MatchStatus.REJECT, f"excluded term matched: {excluded}")
 
     missing_required = [
-        token for token in plan.required_tokens if not _phrase_present(combined, token)
+        token
+        for token in plan.required_tokens
+        if not _phrase_present(combined, _canonical_text(token))
     ]
     if missing_required:
         return MatchDecision(
@@ -54,16 +83,17 @@ def match_candidate(plan: SearchPlan, candidate: SearchCandidate) -> MatchDecisi
 
     missing_attributes: list[str] = []
     for key, expected in plan.identity_attributes.items():
+        expected_normalized = _canonical_text(expected)
         actual = attributes.get(key)
         if actual is not None:
-            if _compact(actual) != _compact(expected):
+            if _compact(actual) != _compact(expected_normalized):
                 return MatchDecision(
                     MatchStatus.REJECT,
-                    f"identity attribute contradiction for {key}: {actual} != {expected}",
+                    f"identity attribute contradiction for {key}: {actual} != {expected_normalized}",
                 )
             continue
 
-        if not _value_present(combined, expected):
+        if not _value_present(combined, expected_normalized):
             missing_attributes.append(key)
 
     if missing_attributes:
