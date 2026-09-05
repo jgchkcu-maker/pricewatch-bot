@@ -317,7 +317,11 @@ class RuntimeRepository:
     async def disable_user_delivery(self, user_id: int) -> None:
         async with self._connection_factory() as connection:
             await connection.execute(
-                "UPDATE telegram_user SET delivery_enabled = FALSE, updated_at = NOW() WHERE id = %s",
+                """
+                UPDATE telegram_user
+                SET delivery_enabled = FALSE, updated_at = NOW()
+                WHERE id = %s
+                """,
                 (user_id,),
             )
             await connection.commit()
