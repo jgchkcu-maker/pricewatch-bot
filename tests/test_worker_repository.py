@@ -2,10 +2,9 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
-from pricewatch.worker_repository import PostgresWorkerRepository
-
 from pricewatch.runtime_models import TrackedProductRecord
 from pricewatch.taxonomy import MarketplaceTaxonomy
+from pricewatch.worker_repository import PostgresWorkerRepository
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
 PLAN_JSON = (
