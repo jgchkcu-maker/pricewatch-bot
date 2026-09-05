@@ -183,6 +183,15 @@ class TelegramBotApp:
             products = await self._repository.list_user_products(user_id)
             await self._send(chat_id, render_product_list(products))
             return
+        if data.startswith("my_page:"):
+            _, _, raw_page = data.partition(":")
+            try:
+                page = int(raw_page)
+            except ValueError:
+                return
+            products = await self._repository.list_user_products(user_id)
+            await self._send(chat_id, render_product_list(products, page=max(0, page)))
+            return
 
         action, separator, raw_id = data.partition(":")
         if not separator or not raw_id:
