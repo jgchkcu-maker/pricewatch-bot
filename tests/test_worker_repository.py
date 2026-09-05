@@ -1,12 +1,19 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+
+from pricewatch.worker_repository import PostgresWorkerRepository
 
 from pricewatch.runtime_models import TrackedProductRecord
 from pricewatch.taxonomy import MarketplaceTaxonomy
-from pricewatch.worker_repository import PostgresWorkerRepository
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
+PLAN_JSON = (
+    '{"canonical_name":"Xiaomi Pad 7 8/256",'
+    '"primary_query":"xiaomi pad 7 8 256","product_type":"tablet",'
+    '"aliases":[],"required_tokens":[],"excluded_terms":[],'
+    '"identity_attributes":{"model":"pad 7","ram":"8 gb","storage":"256 gb"}}'
+)
 
 
 class FakeCursor:
@@ -37,7 +44,7 @@ class FakeConnection:
                         "Xiaomi Pad 7 8/256",
                         "tablet",
                         "fingerprint",
-                        '{"canonical_name":"Xiaomi Pad 7 8/256","primary_query":"xiaomi pad 7 8 256","product_type":"tablet","aliases":[],"required_tokens":[],"excluded_terms":[],"identity_attributes":{"model":"pad 7","ram":"8 gb","storage":"256 gb"}}',
+                        PLAN_JSON,
                         "active",
                         2,
                         NOW,
@@ -137,9 +144,13 @@ def test_complete_scan_releases_lease_and_uses_success_or_backoff_schedule() -> 
             retry_after_seconds=600,
         )
     )
-    params = [params for query, params in failure_connection.calls if "update tracked_product" in query.lower()][0]
-    assert params is not None
-    assert params[0] == NOW
+    failure_updates = [
+        params
+        for query, params in failure_connection.calls
+        if "update tracked_product" in query.lower()
+    ]
+    assert failure_updates[0] is not None
+    assert failure_updates[0][0] == NOW + timedelta(seconds=600)
 
 
 def test_verified_taxonomy_positive_is_append_only_evidence() -> None:
