@@ -32,7 +32,7 @@ class WorkerRepository(Protocol):
         lease_seconds: int,
     ) -> tuple[TrackedProductRecord, ...]: ...
 
-    async def known_listings(
+    async def list_known_candidates(
         self,
         product_id: int,
         marketplace: str,
@@ -155,7 +155,7 @@ class PriceWorker:
         now: datetime,
     ) -> None:
         allow_alerts = product.last_successful_scan_at is not None
-        known = await self._repository.known_listings(product.id, adapter.marketplace)
+        known = await self._repository.list_known_candidates(product.id, adapter.marketplace)
         attempted: set[tuple[str, str, str | None, str | None]] = set()
 
         for known_candidate in known:
