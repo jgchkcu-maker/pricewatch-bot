@@ -187,7 +187,7 @@ class MemoryRuntime:
         self.claim_count += len(due)
         return due
 
-    async def known_listings(self, product_id, marketplace):
+    async def list_known_candidates(self, product_id, marketplace):
         return tuple(self.known.get((product_id, marketplace), {}).values())
 
     async def complete_scan(
