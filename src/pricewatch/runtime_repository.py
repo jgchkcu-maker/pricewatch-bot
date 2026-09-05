@@ -214,20 +214,36 @@ class RuntimeRepository:
                        p.id, p.canonical_name, p.product_type, p.identity_fingerprint,
                        p.search_plan::text, p.lifecycle_state, p.subscriber_count,
                        p.next_scan_at, p.last_successful_scan_at,
-                       ls.public_price::text, ml.marketplace, ml.canonical_url, ls.verified_at
+                       current_offer.public_price::text,
+                       current_offer.marketplace,
+                       current_offer.canonical_url,
+                       current_offer.verified_at,
+                       rolling.seven_day_min_price::text
                 FROM subscription s
                 JOIN tracked_product p ON p.id = s.tracked_product_id
                 LEFT JOIN LATERAL (
-                    SELECT pe.marketplace_listing_id
+                    SELECT current_state.public_price,
+                           ml.marketplace,
+                           ml.canonical_url,
+                           current_state.verified_at
+                    FROM marketplace_listing ml
+                    JOIN listing_state current_state
+                      ON current_state.marketplace_listing_id = ml.id
+                    WHERE ml.tracked_product_id = p.id
+                      AND ml.active = TRUE
+                      AND current_state.public_price IS NOT NULL
+                      AND current_state.available IS NOT FALSE
+                    ORDER BY current_state.public_price ASC,
+                             current_state.verified_at DESC
+                    LIMIT 1
+                ) current_offer ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT MIN(pe.public_price) AS seven_day_min_price
                     FROM price_event pe
                     WHERE pe.tracked_product_id = p.id
                       AND pe.public_price IS NOT NULL
                       AND pe.verified_at >= NOW() - INTERVAL '7 days'
-                    ORDER BY pe.public_price ASC, pe.verified_at DESC
-                    LIMIT 1
-                ) best ON TRUE
-                LEFT JOIN marketplace_listing ml ON ml.id = best.marketplace_listing_id
-                LEFT JOIN listing_state ls ON ls.marketplace_listing_id = ml.id
+                ) rolling ON TRUE
                 WHERE s.user_id = %s
                 ORDER BY s.created_at ASC
                 """,
@@ -246,6 +262,9 @@ class RuntimeRepository:
                     marketplace=str(row[14]) if row[14] is not None else None,
                     listing_url=str(row[15]) if row[15] is not None else None,
                     verified_at=row[16],  # type: ignore[arg-type]
+                    seven_day_min_price=(
+                        str(row[17]) if row[17] is not None else None
+                    ),
                 )
             )
         return tuple(result)
