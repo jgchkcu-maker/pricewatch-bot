@@ -280,3 +280,28 @@ def test_soft_model_cannot_hard_reject_deterministic_exact_identity() -> None:
     assert decision.status is MatchStatus.AMBIGUOUS
     assert decision.hard_vetoes == ()
     assert engine.uncertain_queue.items()[0].candidate.listing_id == "99"
+
+
+def test_evidence_buffer_is_bounded_and_keeps_newest_records() -> None:
+    engine = HybridMatchEngine(evidence_limit=2)
+
+    for listing_id in ("101", "102", "103"):
+        candidate = exact_candidate(listing_id)
+        decision = engine.classify(
+            make_plan(),
+            candidate,
+            taxonomy_status=TaxonomyGateStatus.PASS,
+        )
+        engine.record_search_evidence(make_plan(), candidate, decision)
+
+    assert len(engine.evidence) == 2
+    assert [item.listing_id for item in engine.evidence] == ["102", "103"]
+
+
+def test_evidence_limit_must_be_positive() -> None:
+    try:
+        HybridMatchEngine(evidence_limit=0)
+    except ValueError as exc:
+        assert "evidence" in str(exc).lower()
+    else:
+        raise AssertionError("zero evidence limit must be rejected")
