@@ -30,6 +30,10 @@ def test_wb_search_payload_parses_listing_variant_price_and_seller() -> None:
     assert candidate.seller_name == "Example Seller"
     assert candidate.available is True
     assert candidate.price_source == "search"
+    assert candidate.taxonomy is not None
+    assert candidate.taxonomy.subject_id == "107"
+    assert candidate.taxonomy.parent_id == "9491"
+    assert candidate.taxonomy.entity == "Планшеты"
 
 
 def test_wb_empty_products_is_healthy_empty_result() -> None:
