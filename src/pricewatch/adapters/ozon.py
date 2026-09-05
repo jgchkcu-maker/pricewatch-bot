@@ -75,7 +75,10 @@ def _widgets(payload: dict[str, Any], name: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for key, raw_widget in _widget_states(payload).items():
         if isinstance(key, str) and _widget_name(key) == name:
-            result.append(_decode_widget(raw_widget))
+            try:
+                result.append(_decode_widget(raw_widget))
+            except ParserDriftError as exc:
+                raise ParserDriftError(f"Ozon {name} widget failed to decode: {exc}") from exc
     return result
 
 
@@ -222,7 +225,10 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
         if not isinstance(key, str) or _widget_name(key) != "tileGridDesktop":
             continue
 
-        widget = _decode_widget(raw_widget)
+        try:
+            widget = _decode_widget(raw_widget)
+        except ParserDriftError as exc:
+            raise ParserDriftError(f"Ozon tile grid widget failed to decode: {exc}") from exc
         items = widget.get("items")
         if not isinstance(items, list):
             raise ParserDriftError("Ozon tile grid widget has no items list")
