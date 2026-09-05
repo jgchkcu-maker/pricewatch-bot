@@ -8,6 +8,7 @@ from pricewatch.learning_persistence import (
     decode_engine_state,
     encode_engine_state,
 )
+
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.match_learning import HybridMatchEngine, LearningEvidenceSource
 from pricewatch.search_plan import SearchPlan
@@ -50,7 +51,7 @@ def accessory_candidate() -> SearchCandidate:
 def test_engine_state_round_trip_preserves_learned_runtime_state() -> None:
     engine = HybridMatchEngine()
     candidate = ambiguous_candidate()
-    decision = engine.classify(
+    engine.classify(
         plan(),
         candidate,
         taxonomy_status=TaxonomyGateStatus.PASS,
