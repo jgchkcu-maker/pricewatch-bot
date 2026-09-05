@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from statistics import median
-from collections.abc import Iterable
 
 
 def _require_aware(value: datetime) -> None:
