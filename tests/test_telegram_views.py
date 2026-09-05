@@ -28,12 +28,17 @@ def plan() -> SearchPlan:
     )
 
 
-def summary(*, price: str | None = "29490", status: str = "active") -> UserProductSummary:
+def summary(
+    *,
+    price: str | None = "29490",
+    status: str = "active",
+    subscription_id: int = 7,
+) -> UserProductSummary:
     product = TrackedProductRecord(
-        id=42,
+        id=42 + subscription_id,
         canonical_name="Xiaomi Pad 7 8/256",
         product_type="tablet",
-        identity_fingerprint="fp",
+        identity_fingerprint=f"fp-{subscription_id}",
         search_plan=plan(),
         lifecycle_state="active",
         subscriber_count=1,
@@ -41,9 +46,9 @@ def summary(*, price: str | None = "29490", status: str = "active") -> UserProdu
         last_successful_scan_at=NOW if price else None,
     )
     subscription = SubscriptionRecord(
-        id=7,
+        id=subscription_id,
         user_id=1,
-        tracked_product_id=42,
+        tracked_product_id=product.id,
         status=status,
     )
     return UserProductSummary(
@@ -53,18 +58,23 @@ def summary(*, price: str | None = "29490", status: str = "active") -> UserProdu
         marketplace="ozon" if price else None,
         listing_url="https://www.ozon.ru/product/123/" if price else None,
         verified_at=NOW if price else None,
+        seven_day_min_price=price,
     )
 
 
 def test_buyer_views_hide_internal_jargon_and_render_confirmation_attributes() -> None:
     start = render_start()
     confirmation = render_confirmation(plan(), confirmation_id="abc")
-    combined = f"{start.text}\n{confirmation.text}".casefold()
+    tracking = render_tracking_card(summary())
+    product_list = render_product_list((summary(),))
+    combined = "\n".join(
+        (start.text, confirmation.text, tracking.text, product_list.text)
+    ).casefold()
 
     assert "pricewatch" in start.text.casefold()
-    assert "ram: 8 gb" in confirmation.text.casefold()
-    assert "storage: 256 gb" in confirmation.text.casefold()
-    for jargon in ("taxonomy", "searchplan", "listing_id", "lease", "confidence"):
+    assert "ram: 8 гб" in confirmation.text.casefold()
+    assert "память: 256 гб" in confirmation.text.casefold()
+    for jargon in ("taxonomy", "searchplan", "listing_id", "lease", "confidence", "matcher"):
         assert jargon not in combined
     callback_values = [
         button["callback_data"]
@@ -75,16 +85,20 @@ def test_buyer_views_hide_internal_jargon_and_render_confirmation_attributes() -
     assert "confirm:abc" in callback_values
 
 
-def test_tracking_card_has_neutral_pre_scan_state_and_pause_resume_button() -> None:
+def test_tracking_card_has_pre_scan_state_and_rolling_minimum() -> None:
     pending = render_tracking_card(summary(price=None))
     active = render_tracking_card(summary())
     paused = render_tracking_card(summary(status="paused"))
 
     assert "ищу актуальные предложения" in pending.text.casefold()
     assert "29 490 ₽" in active.text
+    assert "минимум за 7 дней" in active.text.casefold()
     assert "примерно каждые 4 минуты" in active.text.casefold()
     assert "pause:7" in str(active.reply_markup)
     assert "resume:7" in str(paused.reply_markup)
+    assert active.reply_markup["inline_keyboard"][0][0]["url"] == (
+        "https://www.ozon.ru/product/123/"
+    )
 
 
 def test_new_low_alert_uses_exact_verified_url_and_public_price() -> None:
@@ -110,10 +124,17 @@ def test_new_low_alert_uses_exact_verified_url_and_public_price() -> None:
     assert buy["url"] == "https://www.ozon.ru/product/123/"
 
 
-def test_product_list_is_compact_and_numbers_items() -> None:
-    view = render_product_list((summary(), summary(status="paused")))
+def test_product_list_is_compact_numbers_items_and_paginates() -> None:
+    products = tuple(summary(subscription_id=index) for index in range(1, 11))
 
-    assert "📦" in view.text
-    assert "1." in view.text and "2." in view.text
-    assert "29 490 ₽" in view.text
+    first = render_product_list(products)
+    second = render_product_list(products, page=1)
+
+    assert "📦 Отслеживается: 10" in first.text
+    assert "1." in first.text and "8." in first.text
+    assert "9." not in first.text
+    assert "my_page:1" in str(first.reply_markup)
+    assert "9." in second.text and "10." in second.text
+    assert "my_page:0" in str(second.reply_markup)
+    assert "29 490 ₽" in first.text
     assert Decimal("29490") == Decimal(summary().public_price)
