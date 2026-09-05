@@ -9,7 +9,13 @@ from pricewatch.search_plan import SearchPlan
 class FakeSearchAdapter:
     marketplace = "wildberries"
 
-    async def search(self, query: str, *, limit: int = 50) -> list[SearchCandidate]:
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+    ) -> list[SearchCandidate]:
         assert query in {"xiaomi pad 7 8 256", "xiaomi pad7 8 256"}
         return [
             SearchCandidate(
@@ -59,13 +65,19 @@ def make_plan() -> SearchPlan:
 def test_scan_splits_accepted_rejected_and_ambiguous_candidates() -> None:
     outcome = asyncio.run(scan_once(make_plan(), FakeSearchAdapter(), cycle=0))
 
-    assert outcome.query == "xiaomi pad 7 8 256"
+    assert outcome.queries == ("xiaomi pad 7 8 256",)
     assert [(item.listing_id, item.variation_id) for item in outcome.accepted] == [("1", "11")]
     assert [(item.listing_id, item.variation_id) for item in outcome.ambiguous] == [("3", "33")]
     assert outcome.rejected_count == 1
     assert outcome.accepted[0].price == Decimal("31990")
 
 
-def test_scan_uses_rotating_alias_on_odd_cycle() -> None:
+def test_scan_keeps_primary_and_adds_rotating_alias_without_duplicate_offers() -> None:
     outcome = asyncio.run(scan_once(make_plan(), FakeSearchAdapter(), cycle=1))
-    assert outcome.query == "xiaomi pad7 8 256"
+
+    assert outcome.queries == ("xiaomi pad 7 8 256", "xiaomi pad7 8 256")
+    assert outcome.raw_count == 6
+    assert outcome.duplicate_count == 3
+    assert len(outcome.accepted) == 1
+    assert len(outcome.ambiguous) == 1
+    assert outcome.rejected_count == 1
