@@ -6,6 +6,7 @@ from pricewatch.taxonomy import (
     TaxonomyRegistry,
     taxonomy_gate,
 )
+
 from pricewatch.marketplaces import SearchCandidate
 
 
