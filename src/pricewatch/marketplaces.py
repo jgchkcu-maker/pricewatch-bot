@@ -44,9 +44,17 @@ class OfferSnapshot:
     attributes: Mapping[str, str] = field(default_factory=dict)
 
 
-class MarketplaceAdapter(Protocol):
+class MarketplaceSearchAdapter(Protocol):
     marketplace: str
 
     async def search(self, query: str, *, limit: int = 50) -> list[SearchCandidate]: ...
 
+
+class MarketplaceOfferAdapter(Protocol):
+    marketplace: str
+
     async def fetch_offer(self, locator: OfferLocator) -> OfferSnapshot: ...
+
+
+class MarketplaceAdapter(MarketplaceSearchAdapter, MarketplaceOfferAdapter, Protocol):
+    """Full adapter contract for marketplaces that implement search and offer fetch."""
