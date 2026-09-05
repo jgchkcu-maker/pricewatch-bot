@@ -145,3 +145,26 @@ def test_verified_detail_identity_overrides_uncalibrated_probability() -> None:
     evidence = engine.evidence[-1]
     assert evidence.source is LearningEvidenceSource.DETAIL
     assert evidence.verified_label is True
+
+
+def test_ambiguous_detail_does_not_poison_online_training() -> None:
+    engine = HybridMatchEngine()
+    before = dict(engine.model.weights)
+
+    try:
+        asyncio.run(
+            verify_candidate(
+                plan(),
+                search_candidate(),
+                FakeOfferAdapter("Xiaomi Pad 7 256ГБ", Decimal("29490")),
+                match_engine=engine,
+                source_queries=("xiaomi pad 7 8 256",),
+            )
+        )
+    except OfferIdentityError:
+        pass
+    else:
+        raise AssertionError("ambiguous detail must not become a verified offer")
+
+    assert engine.model.weights == before
+    assert engine.evidence == []
