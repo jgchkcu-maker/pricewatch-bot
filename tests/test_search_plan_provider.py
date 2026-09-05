@@ -38,6 +38,24 @@ def valid_plan_json() -> str:
     )
 
 
+def exact_identifier_plan_json() -> str:
+    return json.dumps(
+        {
+            "canonical_name": "Example Product",
+            "product_type": "device",
+            "primary_query": "example product",
+            "aliases": [],
+            "required_tokens": ["example"],
+            "excluded_terms": [],
+            "identity_attributes": {
+                "brand": "Example",
+                "model": "Product",
+                "gtin": "1234567890123",
+            },
+        }
+    )
+
+
 def test_gemini_provider_uses_system_instruction_json_mode_and_parses_plan() -> None:
     captured: dict[str, object] = {}
 
@@ -115,3 +133,30 @@ def test_gemini_provider_keeps_strict_search_plan_payload_validation() -> None:
     else:
         raise AssertionError("strict SearchPlan validation must remain authoritative")
     asyncio.run(client.aclose())
+
+
+def test_gemini_provider_rejects_exact_identifier_not_present_in_user_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=response_payload(exact_identifier_plan_json()))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="secret", client=client)
+    try:
+        asyncio.run(provider.create_plan("Example Product"))
+    except SearchPlanPayloadError as exc:
+        assert "identifier" in str(exc).lower()
+    else:
+        raise AssertionError("invented exact identifier must be rejected")
+    asyncio.run(client.aclose())
+
+
+def test_gemini_provider_accepts_exact_identifier_when_user_supplies_it() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=response_payload(exact_identifier_plan_json()))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="secret", client=client)
+    plan = asyncio.run(provider.create_plan("Example Product GTIN 1234567890123"))
+    asyncio.run(client.aclose())
+
+    assert plan.identity_attributes["gtin"] == "1234567890123"
