@@ -4,6 +4,7 @@ from decimal import Decimal
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.scan import scan_once
 from pricewatch.search_plan import SearchPlan
+from pricewatch.taxonomy import MarketplaceTaxonomy
 
 
 class FakeSearchAdapter:
@@ -15,8 +16,10 @@ class FakeSearchAdapter:
         *,
         limit: int = 50,
         page: int = 1,
+        category_path: str | None = None,
     ) -> list[SearchCandidate]:
         assert query in {"xiaomi pad 7 8 256", "xiaomi pad7 8 256"}
+        assert category_path is None
         return [
             SearchCandidate(
                 marketplace="wildberries",
@@ -24,6 +27,7 @@ class FakeSearchAdapter:
                 variation_id="11",
                 title="Xiaomi Pad7 8ГБ 256ГБ",
                 attributes={"brand": "Xiaomi"},
+                taxonomy=MarketplaceTaxonomy(subject_id="107", entity="Планшеты"),
                 price=Decimal("31990"),
                 price_source="search",
             ),
@@ -31,7 +35,8 @@ class FakeSearchAdapter:
                 marketplace="wildberries",
                 listing_id="2",
                 variation_id="22",
-                title="Чехол для Xiaomi Pad 7 8/256",
+                title="Xiaomi Pad 7 8ГБ 256ГБ премиум аксессуар",
+                taxonomy=MarketplaceTaxonomy(subject_id="203", entity="Чехлы"),
                 price=Decimal("990"),
                 price_source="search",
             ),
@@ -41,19 +46,39 @@ class FakeSearchAdapter:
                 variation_id="33",
                 title="Xiaomi Pad 7 256GB",
                 attributes={"brand": "Xiaomi"},
+                taxonomy=MarketplaceTaxonomy(subject_id="107", entity="Планшеты"),
                 price=Decimal("29990"),
                 price_source="search",
             ),
         ]
 
 
-def make_plan() -> SearchPlan:
+class FakeOzonSearchAdapter:
+    marketplace = "ozon"
+
+    def __init__(self) -> None:
+        self.category_paths: list[str | None] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+        category_path: str | None = None,
+    ) -> list[SearchCandidate]:
+        self.category_paths.append(category_path)
+        return []
+
+
+def make_plan(*, product_type: str = "tablet") -> SearchPlan:
     return SearchPlan(
         canonical_name="Xiaomi Pad 7 8/256",
         primary_query="Xiaomi Pad 7 8/256",
+        product_type=product_type,
         aliases=("Xiaomi Pad7 8 256",),
         required_tokens=("xiaomi",),
-        excluded_terms=("чехол", "case", "pad 7 pro"),
+        excluded_terms=("case", "pad 7 pro"),
         identity_attributes={
             "model": "pad 7",
             "ram": "8 gb",
@@ -62,13 +87,14 @@ def make_plan() -> SearchPlan:
     )
 
 
-def test_scan_splits_accepted_rejected_and_ambiguous_candidates() -> None:
+def test_scan_splits_taxonomy_rejected_and_ambiguous_candidates() -> None:
     outcome = asyncio.run(scan_once(make_plan(), FakeSearchAdapter(), cycle=0))
 
     assert outcome.queries == ("xiaomi pad 7 8 256",)
     assert [(item.listing_id, item.variation_id) for item in outcome.accepted] == [("1", "11")]
     assert [(item.listing_id, item.variation_id) for item in outcome.ambiguous] == [("3", "33")]
     assert outcome.rejected_count == 1
+    assert outcome.taxonomy_rejected_count == 1
     assert outcome.accepted[0].price == Decimal("31990")
 
 
@@ -81,3 +107,20 @@ def test_scan_keeps_primary_and_adds_rotating_alias_without_duplicate_offers() -
     assert len(outcome.accepted) == 1
     assert len(outcome.ambiguous) == 1
     assert outcome.rejected_count == 1
+    assert outcome.taxonomy_rejected_count == 1
+
+
+def test_scan_passes_known_ozon_category_scope_to_adapter() -> None:
+    adapter = FakeOzonSearchAdapter()
+
+    asyncio.run(scan_once(make_plan(), adapter, cycle=0))
+
+    assert adapter.category_paths == ["/category/planshety-15525/"]
+
+
+def test_scan_keeps_global_search_for_unknown_ozon_product_type() -> None:
+    adapter = FakeOzonSearchAdapter()
+
+    asyncio.run(scan_once(make_plan(product_type="rare experimental device"), adapter, cycle=0))
+
+    assert adapter.category_paths == [None]
