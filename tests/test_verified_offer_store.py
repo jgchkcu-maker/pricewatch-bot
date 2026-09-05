@@ -3,11 +3,10 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from pricewatch.verified_store import VerifiedOfferStore
-
 from pricewatch.marketplaces import OfferLocator, OfferSnapshot, SearchCandidate
 from pricewatch.runtime_models import TrackedProductRecord
 from pricewatch.search_plan import SearchPlan
+from pricewatch.verified_store import VerifiedOfferStore
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
 
