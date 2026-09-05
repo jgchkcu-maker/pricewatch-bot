@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from pricewatch.runtime_models import UserProductSummary
 from pricewatch.search_plan import SearchPlan
