@@ -29,14 +29,12 @@ def _normalized_tuple(values: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _identity_attributes(values: Mapping[str, str]) -> dict[str, str]:
-    """Normalize identity keys while preserving human-readable value formatting."""
-
     result: dict[str, str] = {}
     for key, value in values.items():
         normalized_key = normalize_query(key)
-        display_value = unicodedata.normalize("NFKC", value).strip()
-        if normalized_key and normalize_query(display_value):
-            result[normalized_key] = display_value
+        normalized_value = normalize_query(value)
+        if normalized_key and normalized_value:
+            result[normalized_key] = normalized_value
     return result
 
 
