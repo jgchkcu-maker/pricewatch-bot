@@ -6,9 +6,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlsplit
 
-from pricewatch.marketplaces import ParserDriftError, SearchCandidate
+from pricewatch.marketplaces import JsonFetcher, ParserDriftError, SearchCandidate, SearchRequest
 
 _OZON_ORIGIN = "https://www.ozon.ru"
+_OZON_SEARCH_URL = f"{_OZON_ORIGIN}/api/composer-api.bx/page/json/v2"
 
 
 def _parse_rub_price(value: object) -> Decimal | None:
@@ -158,3 +159,27 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
             )
 
     return candidates
+
+
+class OzonSearchAdapter:
+    marketplace = "ozon"
+
+    def __init__(self, fetcher: JsonFetcher) -> None:
+        self._fetcher = fetcher
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+    ) -> list[SearchCandidate]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        if page <= 0:
+            raise ValueError("page must be positive")
+
+        inner_path = f"/search/?text={query}&page={page}"
+        request = SearchRequest(url=_OZON_SEARCH_URL, params={"url": inner_path})
+        payload = await self._fetcher.get_json(request)
+        return parse_search_payload(payload)[:limit]
