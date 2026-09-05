@@ -1,11 +1,10 @@
+from pricewatch.marketplaces import SearchCandidate
 from pricewatch.match_learning import (
     HardNegativeBucket,
     HybridMatchEngine,
     LearningEvidenceSource,
     QueryPerformanceTracker,
 )
-
-from pricewatch.marketplaces import SearchCandidate
 from pricewatch.matching import MatchStatus
 from pricewatch.search_plan import SearchPlan
 from pricewatch.taxonomy import MarketplaceTaxonomy, TaxonomyGateStatus
