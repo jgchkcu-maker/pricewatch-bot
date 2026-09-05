@@ -27,7 +27,7 @@ class FakeConnection:
     async def execute(self, query: str, params=None):
         self.calls.append((query, params))
         normalized = " ".join(query.lower().split())
-        if "from tracked_product p" in normalized and "for update skip locked" in normalized:
+        if "from tracked_product p" in normalized and "for update of p skip locked" in normalized:
             return FakeCursor(rows=[])
         if "select ml.marketplace" in normalized and "from marketplace_listing ml" in normalized:
             return FakeCursor(
@@ -75,7 +75,7 @@ def test_claim_due_products_uses_skip_locked_and_worker_lease() -> None:
 
     assert claimed == ()
     sql = "\n".join(query for query, _ in connection.calls).lower()
-    assert "for update skip locked" in sql
+    assert "for update of p skip locked" in sql
     assert "insert into worker_lease" in sql
     assert "lease_until" in sql
     assert connection.commits == 1
