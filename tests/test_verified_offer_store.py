@@ -3,11 +3,11 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from pricewatch.verified_store import VerifiedOfferStore
+
 from pricewatch.marketplaces import OfferLocator, OfferSnapshot, SearchCandidate
 from pricewatch.runtime_models import TrackedProductRecord
 from pricewatch.search_plan import SearchPlan
-from pricewatch.verified_store import VerifiedOfferStore
-
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
 
@@ -17,7 +17,12 @@ def product(*, first_scan: bool = False) -> TrackedProductRecord:
         canonical_name="Xiaomi Pad 7 8/256",
         primary_query="xiaomi pad 7 8 256",
         product_type="tablet",
-        identity_attributes={"brand": "xiaomi", "model": "pad 7", "ram": "8 gb", "storage": "256 gb"},
+        identity_attributes={
+            "brand": "xiaomi",
+            "model": "pad 7",
+            "ram": "8 gb",
+            "storage": "256 gb",
+        },
     )
     return TrackedProductRecord(
         id=42,
