@@ -1,10 +1,15 @@
 import asyncio
 from decimal import Decimal
 
+from pricewatch.match_learning import (
+    HardNegativeBucket,
+    HybridMatchEngine,
+    LearningEvidenceSource,
+)
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.scan import scan_once
 from pricewatch.search_plan import SearchPlan
-from pricewatch.taxonomy import MarketplaceTaxonomy
+from pricewatch.taxonomy import MarketplaceTaxonomy, TaxonomyObservationAccumulator
 
 
 class FakeSearchAdapter:
@@ -124,3 +129,42 @@ def test_scan_keeps_global_search_for_unknown_ozon_product_type() -> None:
     asyncio.run(scan_once(make_plan(product_type="rare experimental device"), adapter, cycle=0))
 
     assert adapter.category_paths == [None]
+
+
+def test_scan_collects_learning_evidence_without_training_model() -> None:
+    engine = HybridMatchEngine()
+    before = dict(engine.model.weights)
+
+    outcome = asyncio.run(
+        scan_once(
+            make_plan(),
+            FakeSearchAdapter(),
+            cycle=0,
+            match_engine=engine,
+        )
+    )
+
+    assert engine.model.weights == before
+    assert len(engine.evidence) == 3
+    assert all(item.source is LearningEvidenceSource.SEARCH for item in engine.evidence)
+    assert any(
+        item.bucket is HardNegativeBucket.TAXONOMY_CONFLICT
+        for item in engine.hard_negatives
+    )
+    assert len(engine.uncertain_queue.items()) == 1
+    assert engine.query_performance.score(outcome.queries[0]) > 0
+
+
+def test_scan_does_not_train_taxonomy_from_unverified_search_accepts() -> None:
+    observations = TaxonomyObservationAccumulator()
+
+    asyncio.run(
+        scan_once(
+            make_plan(),
+            FakeSearchAdapter(),
+            cycle=0,
+            taxonomy_observations=observations,
+        )
+    )
+
+    assert observations.propose("tablet", "wildberries", minimum_distinct=1) is None
