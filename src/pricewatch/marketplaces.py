@@ -57,6 +57,7 @@ class OfferSnapshot:
     available: bool
     attributes: Mapping[str, str] = field(default_factory=dict)
     original_price: Decimal | None = None
+    conditional_prices: Mapping[str, Decimal] = field(default_factory=dict)
     price_source: str = "offer"
 
 
