@@ -48,6 +48,31 @@ def accessory_candidate() -> SearchCandidate:
     )
 
 
+def verified_engine_and_evidence() -> tuple[HybridMatchEngine, object]:
+    engine = HybridMatchEngine()
+    candidate = SearchCandidate(
+        marketplace="wildberries",
+        listing_id="50",
+        title="Xiaomi Pad 7 8GB 256GB",
+        attributes={"model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
+    )
+    engine.query_performance.record_discovery(
+        "xiaomi pad7 8 256",
+        candidate_ids={"50"},
+        accepted_ids={"50"},
+    )
+    decision = engine.classify(plan(), candidate)
+    engine.learn_verified(
+        plan(),
+        candidate,
+        decision,
+        matched=True,
+        source=LearningEvidenceSource.DETAIL,
+        source_queries=("xiaomi pad7 8 256",),
+    )
+    return engine, engine.evidence[-1]
+
+
 def test_engine_state_round_trip_preserves_learned_runtime_state() -> None:
     engine = HybridMatchEngine()
     candidate = ambiguous_candidate()
@@ -183,23 +208,7 @@ def test_postgres_store_initializes_saves_and_loads_versioned_state() -> None:
 def test_postgres_store_appends_only_verified_provenance() -> None:
     connection = FakeConnection()
     store = PostgresLearningStateStore(FakeFactory(connection))
-    engine = HybridMatchEngine()
-    candidate = SearchCandidate(
-        marketplace="wildberries",
-        listing_id="50",
-        title="Xiaomi Pad 7 8GB 256GB",
-        attributes={"model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
-    )
-    decision = engine.classify(plan(), candidate)
-    engine.learn_verified(
-        plan(),
-        candidate,
-        decision,
-        matched=True,
-        source=LearningEvidenceSource.DETAIL,
-        source_queries=("xiaomi pad7 8 256",),
-    )
-    verified = engine.evidence[-1]
+    engine, verified = verified_engine_and_evidence()
 
     asyncio.run(store.append_verified_evidence("product:42", verified))
 
@@ -207,6 +216,12 @@ def test_postgres_store_appends_only_verified_provenance() -> None:
     assert "insert into pricewatch_learning_evidence" in sql
     assert connection.commits == 1
 
+    candidate = SearchCandidate(
+        marketplace="wildberries",
+        listing_id="51",
+        title="Xiaomi Pad 7 8GB 256GB",
+        attributes={"model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
+    )
     search_engine = HybridMatchEngine()
     search_decision = search_engine.classify(plan(), candidate)
     search_engine.record_search_evidence(plan(), candidate, search_decision)
@@ -218,3 +233,33 @@ def test_postgres_store_appends_only_verified_provenance() -> None:
         assert "verified" in str(exc).lower()
     else:
         raise AssertionError("search-only evidence must not be persisted as verified provenance")
+
+    assert engine.evidence[-1].verified_label is True
+
+
+def test_load_engine_returns_fresh_engine_when_no_state_exists() -> None:
+    store = PostgresLearningStateStore(FakeFactory(FakeConnection()))
+
+    engine = asyncio.run(store.load_engine("product:missing"))
+
+    assert isinstance(engine, HybridMatchEngine)
+    assert engine.model.weights == HybridMatchEngine().model.weights
+
+
+def test_verified_update_persists_state_and_provenance_in_one_commit() -> None:
+    connection = FakeConnection()
+    store = PostgresLearningStateStore(FakeFactory(connection))
+    engine, verified = verified_engine_and_evidence()
+
+    asyncio.run(store.save_verified_update("product:42", engine, verified))
+
+    assert connection.commits == 1
+    sql = "\n".join(query for query, _ in connection.calls).lower()
+    assert "insert into pricewatch_learning_state" in sql
+    assert "insert into pricewatch_learning_evidence" in sql
+
+    restored = asyncio.run(store.load_engine("product:42"))
+    assert restored.model.weights == engine.model.weights
+    assert restored.query_performance.score("xiaomi pad7 8 256") == engine.query_performance.score(
+        "xiaomi pad7 8 256"
+    )
