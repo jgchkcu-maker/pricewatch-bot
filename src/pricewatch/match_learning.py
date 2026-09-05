@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -472,9 +473,12 @@ class HybridMatchEngine:
         accept_threshold: float = 0.98,
         reject_threshold: float = 0.05,
         model: OnlineMatchModel | None = None,
+        evidence_limit: int = 4096,
     ) -> None:
         if not 0 < reject_threshold < accept_threshold < 1:
             raise ValueError("thresholds must satisfy 0 < reject < accept < 1")
+        if evidence_limit <= 0:
+            raise ValueError("evidence_limit must be positive")
         self.accept_threshold = accept_threshold
         self.reject_threshold = reject_threshold
         self.model = model or OnlineMatchModel()
@@ -483,7 +487,7 @@ class HybridMatchEngine:
         self._hard_negative_keys: set[
             tuple[str, str, str | None, HardNegativeBucket]
         ] = set()
-        self.evidence: list[LearningEvidence] = []
+        self.evidence: deque[LearningEvidence] = deque(maxlen=evidence_limit)
         self.query_performance = QueryPerformanceTracker()
 
     def _features(
