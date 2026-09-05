@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
+
 from pricewatch.search_plan import SearchPlan
 
 DEFAULT_SEARCH_PLAN_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 SEARCH_PLAN_SYSTEM_PROMPT = r"""
 You are the product-identity and marketplace-search planner for a universal price radar.
@@ -145,3 +148,99 @@ def parse_search_plan_response(raw_text: str) -> SearchPlan:
         )
     except ValueError as exc:
         raise SearchPlanPayloadError(str(exc)) from exc
+
+
+class GeminiSearchPlanProvider:
+    """Create a SearchPlan once from Gemini, outside the marketplace polling hot path."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = DEFAULT_SEARCH_PLAN_MODEL,
+        base_url: str = DEFAULT_GEMINI_BASE_URL,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        key = api_key.strip()
+        model_name = model.strip()
+        base = base_url.rstrip("/").strip()
+        if not key:
+            raise ValueError("api_key must not be empty")
+        if not model_name:
+            raise ValueError("model must not be empty")
+        if not base:
+            raise ValueError("base_url must not be empty")
+        self._api_key = key
+        self._model = model_name
+        self._base_url = base
+        self._client = client or httpx.AsyncClient(timeout=30.0)
+        self._owns_client = client is None
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def create_plan(self, user_text: str) -> SearchPlan:
+        query = user_text.strip()
+        if not query:
+            raise ValueError("user_text must not be empty")
+
+        url = f"{self._base_url}/models/{self._model}:generateContent"
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": SEARCH_PLAN_SYSTEM_PROMPT}],
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": query}],
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0.1,
+            },
+        }
+        try:
+            response = await self._client.post(
+                url,
+                headers={"x-goog-api-key": self._api_key},
+                json=payload,
+            )
+        except httpx.TimeoutException as exc:
+            raise RuntimeError("Gemini SearchPlan request timed out") from exc
+        except httpx.RequestError as exc:
+            raise RuntimeError("Gemini SearchPlan network request failed") from exc
+
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Gemini SearchPlan request failed: HTTP {response.status_code}"
+            )
+        try:
+            body = response.json()
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("Gemini SearchPlan response was not valid JSON") from exc
+        if not isinstance(body, dict):
+            raise RuntimeError("Gemini SearchPlan response root must be an object")
+
+        candidates = body.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise RuntimeError("Gemini SearchPlan response contained no candidate")
+        first = candidates[0]
+        if not isinstance(first, dict):
+            raise RuntimeError("Gemini SearchPlan candidate must be an object")
+        content = first.get("content")
+        if not isinstance(content, dict):
+            raise RuntimeError("Gemini SearchPlan candidate contained no content")
+        parts = content.get("parts")
+        if not isinstance(parts, list) or not parts:
+            raise RuntimeError("Gemini SearchPlan candidate contained no text part")
+        text_parts = [
+            part.get("text")
+            for part in parts
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        ]
+        if not text_parts:
+            raise RuntimeError("Gemini SearchPlan candidate contained no text")
+        raw_text = "".join(text_parts)
+        return parse_search_plan_response(raw_text)
