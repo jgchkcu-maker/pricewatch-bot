@@ -2,7 +2,9 @@ import asyncio
 from decimal import Decimal
 
 from pricewatch.marketplaces import OfferIdentityError, OfferLocator, OfferSnapshot, SearchCandidate
+from pricewatch.match_learning import HybridMatchEngine, LearningEvidenceSource
 from pricewatch.search_plan import SearchPlan
+from pricewatch.taxonomy import MarketplaceTaxonomy, TaxonomyObservationAccumulator
 from pricewatch.verification import verify_candidate
 
 
@@ -41,6 +43,7 @@ def search_candidate() -> SearchCandidate:
         variation_id="456",
         seller_id="789",
         title="Xiaomi Pad 7 8ГБ 256ГБ",
+        taxonomy=MarketplaceTaxonomy(subject_id="107", entity="Планшеты"),
         price=Decimal("29990"),
         price_source="search",
     )
@@ -73,3 +76,51 @@ def test_verification_rejects_detail_card_that_no_longer_matches_product() -> No
         assert "verification" in str(exc)
     else:
         raise AssertionError("mismatched detail card must not become a verified offer")
+
+
+def test_detail_verification_trains_matcher_and_taxonomy_only_after_success() -> None:
+    engine = HybridMatchEngine()
+    observations = TaxonomyObservationAccumulator()
+    before = dict(engine.model.weights)
+
+    asyncio.run(
+        verify_candidate(
+            plan(),
+            search_candidate(),
+            FakeOfferAdapter("Xiaomi Pad7 8ГБ 256ГБ", Decimal("29490")),
+            match_engine=engine,
+            source_queries=("xiaomi pad 7 8 256",),
+            taxonomy_observations=observations,
+        )
+    )
+
+    assert engine.model.weights != before
+    evidence = engine.evidence[-1]
+    assert evidence.source is LearningEvidenceSource.DETAIL
+    assert evidence.verified_label is True
+    proposed = observations.propose("tablet", "wildberries", minimum_distinct=1)
+    assert proposed is not None
+    assert proposed.subject_ids == frozenset({"107"})
+
+
+def test_failed_detail_identity_recheck_records_verified_negative() -> None:
+    engine = HybridMatchEngine()
+
+    try:
+        asyncio.run(
+            verify_candidate(
+                plan(),
+                search_candidate(),
+                FakeOfferAdapter("Xiaomi Pad 7 Pro 8ГБ 256ГБ", Decimal("19990")),
+                match_engine=engine,
+                source_queries=("xiaomi pad 7 8 256",),
+            )
+        )
+    except OfferIdentityError:
+        pass
+    else:
+        raise AssertionError("mismatched detail card must not become a verified offer")
+
+    evidence = engine.evidence[-1]
+    assert evidence.source is LearningEvidenceSource.DETAIL
+    assert evidence.verified_label is False
