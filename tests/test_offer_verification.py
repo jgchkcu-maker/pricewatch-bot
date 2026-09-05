@@ -167,4 +167,4 @@ def test_ambiguous_detail_does_not_poison_online_training() -> None:
         raise AssertionError("ambiguous detail must not become a verified offer")
 
     assert engine.model.weights == before
-    assert engine.evidence == []
+    assert len(engine.evidence) == 0
