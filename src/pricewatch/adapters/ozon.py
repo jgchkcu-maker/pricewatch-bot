@@ -325,6 +325,17 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
     )
 
 
+def _scoped_search_path(query: str, page: int, category_path: str | None) -> str:
+    if category_path is None:
+        return f"/search/?text={query}&page={page}"
+
+    path = category_path.strip()
+    if not path.startswith("/category/") or "?" in path or "#" in path:
+        raise ValueError("Ozon category_path must be a safe internal /category/ path")
+    path = f"{path.rstrip('/')}/"
+    return f"{path}?text={query}&page={page}"
+
+
 class OzonSearchAdapter:
     marketplace = "ozon"
 
@@ -338,13 +349,14 @@ class OzonSearchAdapter:
         *,
         limit: int = 50,
         page: int = 1,
+        category_path: str | None = None,
     ) -> list[SearchCandidate]:
         if limit <= 0:
             raise ValueError("limit must be positive")
         if page <= 0:
             raise ValueError("page must be positive")
 
-        inner_path = f"/search/?text={query}&page={page}"
+        inner_path = _scoped_search_path(query, page, category_path)
         request = SearchRequest(url=self._composer_url, params={"url": inner_path})
         payload = await self._fetcher.get_json(request)
         return parse_search_payload(payload)[:limit]
