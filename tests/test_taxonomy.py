@@ -1,4 +1,3 @@
-from pricewatch.marketplaces import SearchCandidate
 from pricewatch.taxonomy import (
     MarketplaceTaxonomy,
     TaxonomyConstraint,
@@ -7,6 +6,7 @@ from pricewatch.taxonomy import (
     TaxonomyRegistry,
     taxonomy_gate,
 )
+from pricewatch.marketplaces import SearchCandidate
 
 
 def test_known_wb_subject_rejects_accessory_category() -> None:
