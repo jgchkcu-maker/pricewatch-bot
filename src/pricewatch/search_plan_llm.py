@@ -70,6 +70,17 @@ _ALLOWED_KEYS = {
     "excluded_terms",
     "identity_attributes",
 }
+_EXACT_IDENTIFIER_KEYS = frozenset(
+    {
+        "gtin",
+        "ean",
+        "upc",
+        "mpn",
+        "sku",
+        "article",
+        "manufacturer part number",
+    }
+)
 
 
 class SearchPlanPayloadError(ValueError):
@@ -92,6 +103,22 @@ def _string_list(value: Any, field: str) -> tuple[str, ...]:
     for item in value:
         result.append(_require_string(item, f"{field} item"))
     return tuple(result)
+
+
+def _compact(value: str) -> str:
+    return "".join(char.casefold() for char in value if char.isalnum())
+
+
+def _validate_exact_identifier_provenance(plan: SearchPlan, user_text: str) -> None:
+    compact_input = _compact(user_text)
+    for key, value in plan.identity_attributes.items():
+        if key not in _EXACT_IDENTIFIER_KEYS:
+            continue
+        compact_value = _compact(value)
+        if not compact_value or compact_value not in compact_input:
+            raise SearchPlanPayloadError(
+                f"exact identifier {key} was not present in the user input"
+            )
 
 
 def parse_search_plan_response(raw_text: str) -> SearchPlan:
@@ -243,4 +270,6 @@ class GeminiSearchPlanProvider:
         if not text_parts:
             raise RuntimeError("Gemini SearchPlan candidate contained no text")
         raw_text = "".join(text_parts)
-        return parse_search_plan_response(raw_text)
+        plan = parse_search_plan_response(raw_text)
+        _validate_exact_identifier_provenance(plan, query)
+        return plan
