@@ -599,9 +599,14 @@ class HybridMatchEngine:
             )
 
         probability = self.model.predict(features)
-        if deterministic.status is MatchStatus.ACCEPT and probability >= self.accept_threshold:
-            status = MatchStatus.ACCEPT
-            reason = "deterministic identity matched with high probabilistic confidence"
+        if deterministic.status is MatchStatus.ACCEPT:
+            if probability >= self.accept_threshold:
+                status = MatchStatus.ACCEPT
+                reason = "deterministic identity matched with high probabilistic confidence"
+            else:
+                status = MatchStatus.AMBIGUOUS
+                reason = "deterministic identity matched but soft scorer requests verification"
+                self.uncertain_queue.add(plan, candidate, probability, source_queries)
         elif probability <= self.reject_threshold:
             status = MatchStatus.REJECT
             reason = "probabilistic identity confidence below reject threshold"
