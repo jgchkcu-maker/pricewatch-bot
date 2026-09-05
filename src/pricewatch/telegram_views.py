@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
@@ -32,13 +33,25 @@ def _marketplace_name(value: str | None) -> str:
     return names.get(value.casefold(), value)
 
 
+def _human_attribute_value(key: str, value: str) -> str:
+    normalized = value.strip()
+    unit_names = {"gb": "ГБ", "tb": "ТБ", "mb": "МБ"}
+    match = re.fullmatch(r"(\d+(?:[.,]\d+)?)\s*(gb|tb|mb)", normalized, re.IGNORECASE)
+    if match:
+        return f"{match.group(1)} {unit_names[match.group(2).casefold()]}"
+    if key.casefold() in {"brand", "model", "edition", "generation"}:
+        return normalized.title()
+    return normalized
+
+
 def render_start() -> TelegramView:
     return TelegramView(
         text=(
             "👋 PriceWatch\n\n"
             "Отправь название товара, который хочешь купить.\n\n"
             "Например:\nXiaomi Pad 7 8/256\n\n"
-            "Я буду проверять Ozon и Wildberries и напишу, когда цена станет самой низкой "
+            "Я буду проверять Ozon и Wildberries\n"
+            "и напишу, когда цена станет самой низкой\n"
             "за последние 7 дней."
         ),
         reply_markup=_inline_keyboard(
@@ -54,7 +67,7 @@ def render_confirmation(plan: SearchPlan, *, confirmation_id: str) -> TelegramVi
         "brand": "Бренд",
         "model": "Модель",
         "ram": "RAM",
-        "storage": "Storage",
+        "storage": "Память",
         "capacity": "Объём",
         "size": "Размер",
         "generation": "Поколение",
@@ -62,7 +75,7 @@ def render_confirmation(plan: SearchPlan, *, confirmation_id: str) -> TelegramVi
     }
     for key, value in plan.identity_attributes.items():
         label = display_keys.get(key.casefold(), key)
-        attributes.append(f"• {label}: {value}")
+        attributes.append(f"• {label}: {_human_attribute_value(key, value)}")
     details = "\n".join(attributes)
     if details:
         details = f"\n{details}\n"
@@ -72,7 +85,9 @@ def render_confirmation(plan: SearchPlan, *, confirmation_id: str) -> TelegramVi
             "🔎 Я понял товар так:\n\n"
             f"{plan.canonical_name}\n"
             f"{details}\n"
-            "Буду искать именно эту версию и отбрасывать несовместимые варианты и аксессуары."
+            "Буду искать именно эту версию,\n"
+            "не смешивая её с похожими моделями,\n"
+            "другими объёмами и аксессуарами."
         ),
         reply_markup=_inline_keyboard(
             [{"text": "✅ Всё верно", "callback_data": f"confirm:{confirmation_id}"}],
@@ -88,9 +103,14 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
         price_block = "Ищу актуальные предложения…"
     else:
         price_block = (
-            "Сейчас лучшая проверенная цена:\n"
+            "Сейчас лучшая цена:\n"
             f"{_format_rub(summary.public_price)} • {_marketplace_name(summary.marketplace)}"
         )
+        if summary.seven_day_min_price is not None:
+            price_block += (
+                "\n\nМинимум за 7 дней:\n"
+                f"{_format_rub(summary.seven_day_min_price)}"
+            )
 
     action = (
         {"text": "▶️ Возобновить", "callback_data": f"resume:{subscription.id}"}
@@ -102,7 +122,7 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
         rows.append(
             [
                 {
-                    "text": f"🛒 Открыть за {_format_rub(summary.public_price)}",
+                    "text": "🛒 Открыть товар",
                     "url": summary.listing_url,
                 }
             ]
@@ -121,7 +141,14 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
     )
 
 
-def render_product_list(products: tuple[UserProductSummary, ...]) -> TelegramView:
+def render_product_list(
+    products: tuple[UserProductSummary, ...],
+    *,
+    page: int = 0,
+    page_size: int = 8,
+) -> TelegramView:
+    if page_size <= 0:
+        raise ValueError("page_size must be positive")
     if not products:
         return TelegramView(
             text="📦 Пока ничего не отслеживается.",
@@ -130,26 +157,44 @@ def render_product_list(products: tuple[UserProductSummary, ...]) -> TelegramVie
             ),
         )
 
-    lines = [f"📦 Твои товары: {len(products)}", ""]
+    last_page = (len(products) - 1) // page_size
+    current_page = min(max(page, 0), last_page)
+    start = current_page * page_size
+    visible = products[start : start + page_size]
+
+    lines = [f"📦 Отслеживается: {len(products)}", ""]
     buttons: list[list[dict[str, str]]] = []
-    for index, item in enumerate(products, start=1):
+    for offset, item in enumerate(visible, start=start + 1):
         state = "⏸" if item.subscription.status == "paused" else ""
-        lines.append(f"{index}. {item.product.canonical_name} {state}".rstrip())
+        lines.append(f"{offset}. {item.product.canonical_name} {state}".rstrip())
         if item.public_price is None:
             lines.append("   ищу актуальную цену")
         else:
             lines.append(
                 f"   {_format_rub(item.public_price)} · {_marketplace_name(item.marketplace)}"
             )
+            if (
+                item.seven_day_min_price is not None
+                and Decimal(item.public_price) == Decimal(item.seven_day_min_price)
+            ):
+                lines.append("   минимум за 7 дней")
         lines.append("")
         buttons.append(
             [
                 {
-                    "text": f"{index}. {item.product.canonical_name[:38]}",
+                    "text": f"{offset}. {item.product.canonical_name[:38]}",
                     "callback_data": f"product:{item.subscription.id}",
                 }
             ]
         )
+
+    nav: list[dict[str, str]] = []
+    if current_page > 0:
+        nav.append({"text": "⬅️ Назад", "callback_data": f"my_page:{current_page - 1}"})
+    if current_page < last_page:
+        nav.append({"text": "Дальше ➡️", "callback_data": f"my_page:{current_page + 1}"})
+    if nav:
+        buttons.append(nav)
     buttons.append([{"text": "➕ Добавить товар", "callback_data": "add"}])
     return TelegramView(text="\n".join(lines).rstrip(), reply_markup={"inline_keyboard": buttons})
 
@@ -180,7 +225,7 @@ def render_new_low(payload: Mapping[str, Any]) -> TelegramView:
             "Цена проверена на карточке товара только что."
         ),
         reply_markup=_inline_keyboard(
-            [{"text": f"🛒 Купить за {price}", "url": url}],
+            [{"text": "🛒 Открыть товар", "url": url}],
         ),
     )
 
