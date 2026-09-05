@@ -1,0 +1,27 @@
+{
+  "products": [
+    {
+      "id": 123456789,
+      "brand": "Xiaomi",
+      "name": "Планшет Xiaomi Pad 7 8ГБ 256ГБ",
+      "supplier": "Example Seller",
+      "supplierId": 4242,
+      "totalQuantity": 5,
+      "sizes": [
+        {
+          "name": "",
+          "origName": "0",
+          "optionId": 987654,
+          "stocks": [{"wh": 1, "qty": 5}],
+          "price": {
+            "basic": 3599000,
+            "product": 3099000,
+            "logistics": 0,
+            "return": 0,
+            "cashback": 0
+          }
+        }
+      ]
+    }
+  ]
+}
