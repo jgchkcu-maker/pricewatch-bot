@@ -1,9 +1,9 @@
 import asyncio
 from datetime import UTC, datetime
 
+import pytest
 from pricewatch.scheduled_runtime import run_scheduled_pass
 from pricewatch.webhook_runtime import TelegramWebhookService, WebhookUnauthorized
-import pytest
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
 
