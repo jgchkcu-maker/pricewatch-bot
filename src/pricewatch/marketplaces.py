@@ -52,6 +52,8 @@ class OfferSnapshot:
     price: Decimal
     available: bool
     attributes: Mapping[str, str] = field(default_factory=dict)
+    original_price: Decimal | None = None
+    price_source: str = "offer"
 
 
 class MarketplaceSearchAdapter(Protocol):
