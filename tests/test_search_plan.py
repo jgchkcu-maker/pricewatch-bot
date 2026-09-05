@@ -1,4 +1,4 @@
-from pricewatch.search_plan import SearchPlan, normalize_query, query_for_cycle
+from pricewatch.search_plan import SearchPlan, normalize_query, queries_for_cycle
 
 
 def test_normalize_query_removes_marketplace_unfriendly_separators() -> None:
@@ -26,18 +26,31 @@ def test_search_plan_deduplicates_normalized_aliases() -> None:
     assert plan.aliases == ("xiaomi pad7 8 256", "сяоми пад 7 8 256")
 
 
-def test_query_rotation_uses_primary_every_second_cycle_and_rotates_aliases() -> None:
+def test_primary_query_runs_every_cycle_and_aliases_are_supplemental() -> None:
     plan = SearchPlan(
         canonical_name="Xiaomi Pad 7 8/256",
         primary_query="xiaomi pad 7 8 256",
         aliases=("xiaomi pad7 8 256", "сяоми пад 7 8 256"),
     )
 
-    assert [query_for_cycle(plan, i) for i in range(6)] == [
-        "xiaomi pad 7 8 256",
-        "xiaomi pad7 8 256",
-        "xiaomi pad 7 8 256",
-        "сяоми пад 7 8 256",
-        "xiaomi pad 7 8 256",
-        "xiaomi pad7 8 256",
+    assert [queries_for_cycle(plan, i) for i in range(8)] == [
+        ("xiaomi pad 7 8 256",),
+        ("xiaomi pad 7 8 256", "xiaomi pad7 8 256"),
+        ("xiaomi pad 7 8 256",),
+        ("xiaomi pad 7 8 256", "сяоми пад 7 8 256"),
+        ("xiaomi pad 7 8 256",),
+        ("xiaomi pad 7 8 256", "xiaomi pad7 8 256"),
+        ("xiaomi pad 7 8 256",),
+        ("xiaomi pad 7 8 256", "сяоми пад 7 8 256"),
     ]
+
+
+def test_alias_frequency_is_configurable() -> None:
+    plan = SearchPlan(
+        canonical_name="x",
+        primary_query="main",
+        aliases=("alt",),
+    )
+
+    assert queries_for_cycle(plan, 2, alias_every_cycles=4) == ("main",)
+    assert queries_for_cycle(plan, 3, alias_every_cycles=4) == ("main", "alt")
