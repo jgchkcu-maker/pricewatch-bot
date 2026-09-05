@@ -79,6 +79,26 @@ def test_gemini_provider_uses_system_instruction_json_mode_and_parses_plan() -> 
     assert payload["generationConfig"]["responseMimeType"] == "application/json"
 
 
+def test_gemini_provider_honors_configurable_base_url_and_model() -> None:
+    captured: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(str(request.url))
+        return httpx.Response(200, json=response_payload(valid_plan_json()))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(
+        api_key="secret",
+        model="gemini-custom",
+        base_url="https://gemini.example.test/v1",
+        client=client,
+    )
+    asyncio.run(provider.create_plan("Xiaomi Pad 7 8/256"))
+    asyncio.run(client.aclose())
+
+    assert captured == ["https://gemini.example.test/v1/models/gemini-custom:generateContent"]
+
+
 def test_gemini_provider_rejects_http_failure_and_malformed_response() -> None:
     def failing(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"error": {"message": "unavailable"}})
@@ -104,6 +124,44 @@ def test_gemini_provider_rejects_http_failure_and_malformed_response() -> None:
         assert "candidate" in str(exc).lower()
     else:
         raise AssertionError("missing candidate text must fail closed")
+    asyncio.run(client.aclose())
+
+
+def test_gemini_provider_rejects_malformed_plan_json() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=response_payload("{not valid json"))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="secret", client=client)
+    try:
+        asyncio.run(provider.create_plan("Xiaomi Pad 7"))
+    except SearchPlanPayloadError as exc:
+        assert "valid json" in str(exc).lower()
+    else:
+        raise AssertionError("malformed plan JSON must fail closed")
+    asyncio.run(client.aclose())
+
+
+def test_gemini_provider_rejects_missing_required_plan_fields() -> None:
+    incomplete = json.dumps(
+        {
+            "canonical_name": "Xiaomi Pad 7",
+            "product_type": "tablet",
+            "primary_query": "xiaomi pad 7",
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=response_payload(incomplete))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="secret", client=client)
+    try:
+        asyncio.run(provider.create_plan("Xiaomi Pad 7"))
+    except SearchPlanPayloadError as exc:
+        assert "missing keys" in str(exc).lower()
+    else:
+        raise AssertionError("missing required plan fields must fail closed")
     asyncio.run(client.aclose())
 
 
