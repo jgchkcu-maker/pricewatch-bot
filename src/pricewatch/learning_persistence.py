@@ -219,6 +219,7 @@ def encode_engine_state(engine: HybridMatchEngine) -> dict[str, Any]:
         "schema_version": LEARNING_STATE_SCHEMA_VERSION,
         "accept_threshold": engine.accept_threshold,
         "reject_threshold": engine.reject_threshold,
+        "evidence_limit": engine.evidence.maxlen,
         "model": {
             "learning_rate": engine.model.learning_rate,
             "weights": dict(engine.model.weights),
@@ -256,6 +257,7 @@ def decode_engine_state(payload: Mapping[str, Any]) -> HybridMatchEngine:
     engine = HybridMatchEngine(
         accept_threshold=float(payload.get("accept_threshold", 0.98)),
         reject_threshold=float(payload.get("reject_threshold", 0.05)),
+        evidence_limit=int(payload.get("evidence_limit", 4096)),
         model=model,
     )
 
@@ -331,6 +333,53 @@ def _validate_scope_key(scope_key: str) -> str:
     return normalized
 
 
+def _serialize_state(payload: Mapping[str, Any]) -> str:
+    version = payload.get("schema_version")
+    if version != LEARNING_STATE_SCHEMA_VERSION:
+        raise ValueError("cannot persist unsupported learning state schema")
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _serialize_verified_evidence(evidence: LearningEvidence) -> str:
+    if evidence.verified_label is None:
+        raise ValueError("only verified learning evidence may be persisted")
+    return json.dumps(
+        _evidence_payload(evidence),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+async def _write_state(
+    connection: _Connection,
+    scope: str,
+    payload: Mapping[str, Any],
+) -> None:
+    await connection.execute(
+        _UPSERT_STATE,
+        (scope, LEARNING_STATE_SCHEMA_VERSION, _serialize_state(payload)),
+    )
+
+
+async def _write_verified_evidence(
+    connection: _Connection,
+    scope: str,
+    evidence: LearningEvidence,
+) -> None:
+    await connection.execute(
+        _INSERT_EVIDENCE,
+        (
+            scope,
+            evidence.marketplace,
+            evidence.listing_id,
+            evidence.variation_id,
+            evidence.source.value,
+            evidence.verified_label,
+            _serialize_verified_evidence(evidence),
+        ),
+    )
+
+
 class PostgresLearningStateStore:
     """Persist one learning-engine state per scope without touching the search hot path.
 
@@ -351,15 +400,8 @@ class PostgresLearningStateStore:
 
     async def save(self, scope_key: str, payload: Mapping[str, Any]) -> None:
         scope = _validate_scope_key(scope_key)
-        version = payload.get("schema_version")
-        if version != LEARNING_STATE_SCHEMA_VERSION:
-            raise ValueError("cannot persist unsupported learning state schema")
-        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         async with self._connection_factory() as connection:
-            await connection.execute(
-                _UPSERT_STATE,
-                (scope, LEARNING_STATE_SCHEMA_VERSION, serialized),
-            )
+            await _write_state(connection, scope, payload)
             await connection.commit()
 
     async def load(self, scope_key: str) -> dict[str, Any] | None:
@@ -385,30 +427,32 @@ class PostgresLearningStateStore:
             raise ValueError("persisted learning state schema metadata is inconsistent")
         return payload
 
+    async def load_engine(self, scope_key: str) -> HybridMatchEngine:
+        payload = await self.load(scope_key)
+        if payload is None:
+            return HybridMatchEngine()
+        return decode_engine_state(payload)
+
     async def append_verified_evidence(
         self,
         scope_key: str,
         evidence: LearningEvidence,
     ) -> None:
         scope = _validate_scope_key(scope_key)
-        if evidence.verified_label is None:
-            raise ValueError("only verified learning evidence may be persisted")
-        serialized = json.dumps(
-            _evidence_payload(evidence),
-            ensure_ascii=False,
-            sort_keys=True,
-        )
         async with self._connection_factory() as connection:
-            await connection.execute(
-                _INSERT_EVIDENCE,
-                (
-                    scope,
-                    evidence.marketplace,
-                    evidence.listing_id,
-                    evidence.variation_id,
-                    evidence.source.value,
-                    evidence.verified_label,
-                    serialized,
-                ),
-            )
+            await _write_verified_evidence(connection, scope, evidence)
+            await connection.commit()
+
+    async def save_verified_update(
+        self,
+        scope_key: str,
+        engine: HybridMatchEngine,
+        evidence: LearningEvidence,
+    ) -> None:
+        """Atomically persist updated adaptive state and its verified provenance record."""
+        scope = _validate_scope_key(scope_key)
+        payload = encode_engine_state(engine)
+        async with self._connection_factory() as connection:
+            await _write_state(connection, scope, payload)
+            await _write_verified_evidence(connection, scope, evidence)
             await connection.commit()
