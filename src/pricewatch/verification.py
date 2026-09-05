@@ -36,7 +36,7 @@ async def verify_candidate(
 
     The detail card's deterministic identity evidence is authoritative. The online scorer is
     allowed to be uncalibrated and is trained toward verified truth; it never supplies its own
-    training label.
+    training label. Missing detail evidence is inconclusive and never becomes a negative label.
     """
     if candidate.marketplace != adapter.marketplace:
         raise ValueError("candidate marketplace does not match verification adapter")
@@ -69,14 +69,30 @@ async def verify_candidate(
     # Hybrid hard vetoes remain authoritative because they encode contradictions such as an
     # identifier or capacity mismatch that a soft scorer must never override.
     matched = deterministic.status is MatchStatus.ACCEPT and not decision.hard_vetoes
-    engine.learn_verified(
-        plan,
-        verified_candidate,
-        decision,
-        matched=matched,
-        source=LearningEvidenceSource.DETAIL,
-        source_queries=source_queries,
-    )
+    contradicted = deterministic.status is MatchStatus.REJECT or bool(decision.hard_vetoes)
+
+    if matched:
+        engine.learn_verified(
+            plan,
+            verified_candidate,
+            decision,
+            matched=True,
+            source=LearningEvidenceSource.DETAIL,
+            source_queries=source_queries,
+        )
+    elif contradicted:
+        engine.learn_verified(
+            plan,
+            verified_candidate,
+            decision,
+            matched=False,
+            source=LearningEvidenceSource.DETAIL,
+            source_queries=source_queries,
+        )
+    else:
+        raise OfferIdentityError(
+            "offer verification failed product identity recheck: detail evidence is ambiguous"
+        )
 
     if not matched:
         reason = decision.hard_vetoes[0] if decision.hard_vetoes else deterministic.reason
