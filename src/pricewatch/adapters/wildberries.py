@@ -3,7 +3,9 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from pricewatch.marketplaces import ParserDriftError, SearchCandidate
+from pricewatch.marketplaces import JsonFetcher, ParserDriftError, SearchCandidate, SearchRequest
+
+_WB_SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v9/search"
 
 
 def _kopecks_to_rubles(value: object) -> Decimal | None:
@@ -98,3 +100,39 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
             )
 
     return candidates
+
+
+class WildberriesSearchAdapter:
+    marketplace = "wildberries"
+
+    def __init__(self, fetcher: JsonFetcher, *, dest: str = "-1257786") -> None:
+        self._fetcher = fetcher
+        self._dest = dest
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+    ) -> list[SearchCandidate]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        if page <= 0:
+            raise ValueError("page must be positive")
+
+        request = SearchRequest(
+            url=_WB_SEARCH_URL,
+            params={
+                "appType": "1",
+                "curr": "rub",
+                "dest": self._dest,
+                "locale": "ru",
+                "query": query,
+                "resultset": "catalog",
+                "page": str(page),
+                "spp": "30",
+            },
+        )
+        payload = await self._fetcher.get_json(request)
+        return parse_search_payload(payload)[:limit]
