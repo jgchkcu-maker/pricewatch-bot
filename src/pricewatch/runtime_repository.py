@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
+from pricewatch.marketplaces import SearchCandidate
 from pricewatch.runtime_models import (
     SubscriptionRecord,
     TrackedProductRecord,
@@ -16,6 +17,7 @@ from pricewatch.runtime_models import (
     search_plan_to_payload,
 )
 from pricewatch.search_plan import SearchPlan
+from pricewatch.taxonomy import MarketplaceTaxonomy
 
 
 class _Cursor(Protocol):
@@ -371,3 +373,125 @@ class RuntimeRepository:
             )
             rows = await cursor.fetchall()
         return [(Decimal(str(row[0])), row[1]) for row in rows]  # type: ignore[list-item]
+
+    async def claim_due_products(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        limit: int,
+        lease_seconds: int,
+    ) -> tuple[TrackedProductRecord, ...]:
+        worker = worker_id.strip()
+        if not worker:
+            raise ValueError("worker_id must not be empty")
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        lease_until = now + timedelta(seconds=lease_seconds)
+
+        async with self._connection_factory() as connection:
+            cursor = await connection.execute(
+                """
+                WITH due AS (
+                    SELECT p.id
+                    FROM tracked_product p
+                    LEFT JOIN worker_lease wl ON wl.tracked_product_id = p.id
+                    WHERE p.lifecycle_state = 'active'
+                      AND p.subscriber_count > 0
+                      AND p.next_scan_at <= %s
+                      AND (wl.tracked_product_id IS NULL OR wl.lease_until <= %s)
+                    ORDER BY p.next_scan_at ASC, p.id ASC
+                    FOR UPDATE OF p SKIP LOCKED
+                    LIMIT %s
+                ), leased AS (
+                    INSERT INTO worker_lease (
+                        tracked_product_id, worker_id, lease_until, updated_at
+                    )
+                    SELECT id, %s, %s, NOW()
+                    FROM due
+                    ON CONFLICT (tracked_product_id) DO UPDATE
+                    SET worker_id = EXCLUDED.worker_id,
+                        lease_until = EXCLUDED.lease_until,
+                        updated_at = NOW()
+                    RETURNING tracked_product_id
+                )
+                SELECT p.id, p.canonical_name, p.product_type, p.identity_fingerprint,
+                       p.search_plan::text, p.lifecycle_state, p.subscriber_count,
+                       p.next_scan_at, p.last_successful_scan_at
+                FROM tracked_product p
+                JOIN leased ON leased.tracked_product_id = p.id
+                ORDER BY p.next_scan_at ASC, p.id ASC
+                """,
+                (now, now, limit, worker, lease_until),
+            )
+            rows = await cursor.fetchall()
+            await connection.commit()
+        return tuple(_tracked_product_from_row(row) for row in rows)
+
+    async def list_known_candidates(
+        self,
+        product_id: int,
+        marketplace: str,
+    ) -> tuple[SearchCandidate, ...]:
+        async with self._connection_factory() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT ml.marketplace, ml.listing_id, ml.variation_id,
+                       ml.seller_id, ml.seller_name, ml.canonical_url,
+                       ml.title, ml.attributes::text, ml.taxonomy::text
+                FROM marketplace_listing ml
+                WHERE ml.tracked_product_id = %s
+                  AND ml.marketplace = %s
+                  AND ml.active = TRUE
+                ORDER BY ml.id ASC
+                """,
+                (product_id, marketplace),
+            )
+            rows = await cursor.fetchall()
+
+        candidates: list[SearchCandidate] = []
+        for row in rows:
+            attributes = _json_object(row[7])
+            taxonomy: MarketplaceTaxonomy | None = None
+            if row[8] is not None:
+                raw_taxonomy = _json_object(row[8])
+                taxonomy = MarketplaceTaxonomy(
+                    subject_id=(
+                        str(raw_taxonomy["subject_id"])
+                        if raw_taxonomy.get("subject_id") is not None
+                        else None
+                    ),
+                    parent_id=(
+                        str(raw_taxonomy["parent_id"])
+                        if raw_taxonomy.get("parent_id") is not None
+                        else None
+                    ),
+                    entity=(
+                        str(raw_taxonomy["entity"])
+                        if raw_taxonomy.get("entity") is not None
+                        else None
+                    ),
+                    category_path=(
+                        str(raw_taxonomy["category_path"])
+                        if raw_taxonomy.get("category_path") is not None
+                        else None
+                    ),
+                )
+            candidates.append(
+                SearchCandidate(
+                    marketplace=str(row[0]),
+                    listing_id=str(row[1]),
+                    variation_id=str(row[2]) if row[2] else None,
+                    seller_id=str(row[3]) if row[3] is not None else None,
+                    seller_name=str(row[4]) if row[4] is not None else None,
+                    url=str(row[5]) if row[5] is not None else None,
+                    title=str(row[6]),
+                    attributes={str(key): str(value) for key, value in attributes.items()},
+                    taxonomy=taxonomy,
+                )
+            )
+        return tuple(candidates)
