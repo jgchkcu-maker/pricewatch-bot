@@ -1,6 +1,5 @@
+import asyncio
 from decimal import Decimal
-
-import pytest
 
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.scan import scan_once
@@ -42,7 +41,7 @@ class FakeSearchAdapter:
         ]
 
 
-def _plan() -> SearchPlan:
+def make_plan() -> SearchPlan:
     return SearchPlan(
         canonical_name="Xiaomi Pad 7 8/256",
         primary_query="Xiaomi Pad 7 8/256",
@@ -57,9 +56,8 @@ def _plan() -> SearchPlan:
     )
 
 
-@pytest.mark.asyncio
-async def test_scan_splits_accepted_rejected_and_ambiguous_candidates() -> None:
-    outcome = await scan_once(_plan(), FakeSearchAdapter(), cycle=0)
+def test_scan_splits_accepted_rejected_and_ambiguous_candidates() -> None:
+    outcome = asyncio.run(scan_once(make_plan(), FakeSearchAdapter(), cycle=0))
 
     assert outcome.query == "xiaomi pad 7 8 256"
     assert [(item.listing_id, item.variation_id) for item in outcome.accepted] == [("1", "11")]
@@ -68,7 +66,6 @@ async def test_scan_splits_accepted_rejected_and_ambiguous_candidates() -> None:
     assert outcome.accepted[0].price == Decimal("31990")
 
 
-@pytest.mark.asyncio
-async def test_scan_uses_rotating_alias_on_odd_cycle() -> None:
-    outcome = await scan_once(_plan(), FakeSearchAdapter(), cycle=1)
+def test_scan_uses_rotating_alias_on_odd_cycle() -> None:
+    outcome = asyncio.run(scan_once(make_plan(), FakeSearchAdapter(), cycle=1))
     assert outcome.query == "xiaomi pad7 8 256"
