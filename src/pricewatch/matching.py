@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.search_plan import SearchPlan, normalize_query
 
 
-class MatchStatus(str, Enum):
+class MatchStatus(StrEnum):
     ACCEPT = "accept"
     REJECT = "reject"
     AMBIGUOUS = "ambiguous"
