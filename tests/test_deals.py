@@ -4,7 +4,6 @@ from decimal import Decimal
 from pricewatch.deals import evaluate_verified_price
 from pricewatch.prices import PriceEvent
 
-
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
 
 
