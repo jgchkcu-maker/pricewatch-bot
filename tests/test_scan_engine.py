@@ -23,7 +23,11 @@ class FakeSearchAdapter:
         page: int = 1,
         category_path: str | None = None,
     ) -> list[SearchCandidate]:
-        assert query in {"xiaomi pad 7 8 256", "xiaomi pad7 8 256"}
+        assert query in {
+            "xiaomi pad 7 8 256",
+            "xiaomi pad7 8 256",
+            "сяоми пад 7 8 256",
+        }
         assert category_path is None
         return [
             SearchCandidate(
@@ -81,7 +85,7 @@ def make_plan(*, product_type: str = "tablet") -> SearchPlan:
         canonical_name="Xiaomi Pad 7 8/256",
         primary_query="Xiaomi Pad 7 8/256",
         product_type=product_type,
-        aliases=("Xiaomi Pad7 8 256",),
+        aliases=("Xiaomi Pad7 8 256", "Сяоми Пад 7 8 256"),
         required_tokens=("xiaomi",),
         excluded_terms=("case", "pad 7 pro"),
         identity_attributes={
@@ -168,3 +172,30 @@ def test_scan_does_not_train_taxonomy_from_unverified_search_accepts() -> None:
     )
 
     assert observations.propose("tablet", "wildberries", minimum_distinct=1) is None
+
+
+def test_scan_uses_verified_query_performance_to_choose_alias() -> None:
+    engine = HybridMatchEngine()
+    engine.query_performance.record_discovery(
+        "xiaomi pad7 8 256",
+        candidate_ids={"10"},
+        accepted_ids={"10"},
+    )
+    engine.query_performance.record_discovery(
+        "сяоми пад 7 8 256",
+        candidate_ids={"20"},
+        accepted_ids={"20"},
+    )
+    engine.query_performance.record_verified("xiaomi pad7 8 256", "10", matched=False)
+    engine.query_performance.record_verified("сяоми пад 7 8 256", "20", matched=True)
+
+    outcome = asyncio.run(
+        scan_once(
+            make_plan(),
+            FakeSearchAdapter(),
+            cycle=5,
+            match_engine=engine,
+        )
+    )
+
+    assert outcome.queries == ("xiaomi pad 7 8 256", "сяоми пад 7 8 256")
