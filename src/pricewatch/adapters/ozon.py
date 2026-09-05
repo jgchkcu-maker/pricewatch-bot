@@ -49,7 +49,9 @@ def _decode_widget(value: object) -> dict[str, Any]:
     return decoded
 
 
-def _tile_text_and_prices(item: dict[str, Any]) -> tuple[str | None, Decimal | None, Decimal | None]:
+def _tile_text_and_prices(
+    item: dict[str, Any],
+) -> tuple[str | None, Decimal | None, Decimal | None]:
     title: str | None = None
     current: Decimal | None = None
     original: Decimal | None = None
@@ -92,8 +94,11 @@ def _tile_text_and_prices(item: dict[str, Any]) -> tuple[str | None, Decimal | N
                 continue
             text = text_ds.get("text")
             test_info = text_ds.get("testInfo")
-            automation_id = test_info.get("automatizationId") if isinstance(test_info, dict) else None
-            if isinstance(text, str) and (atom.get("id") == "name" or automation_id == "tile-name"):
+            automation_id = (
+                test_info.get("automatizationId") if isinstance(test_info, dict) else None
+            )
+            is_name = atom.get("id") == "name" or automation_id == "tile-name"
+            if isinstance(text, str) and is_name:
                 title = text.strip() or None
 
     return title, current, original
