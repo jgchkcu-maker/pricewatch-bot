@@ -68,6 +68,10 @@ def _candidate_text(candidate: SearchCandidate) -> str:
     return " ".join((candidate.title, *candidate.attributes.values()))
 
 
+def _candidate_key(candidate: SearchCandidate) -> tuple[str, str, str | None]:
+    return candidate.marketplace, candidate.listing_id, candidate.variation_id
+
+
 def _normalized_attributes(candidate: SearchCandidate) -> dict[str, str]:
     return {
         normalize_query(key): _canonical(value)
@@ -184,8 +188,7 @@ def _model_match(plan: SearchPlan, candidate: SearchCandidate) -> float:
     ]
     if not model_values:
         return 0.0
-    combined = _candidate_text(candidate)
-    return _coverage(model_values, combined)
+    return _coverage(model_values, _candidate_text(candidate))
 
 
 def _brand_match(plan: SearchPlan, candidate: SearchCandidate) -> float:
@@ -208,7 +211,9 @@ def _brand_match(plan: SearchPlan, candidate: SearchCandidate) -> float:
 
 
 def _model_token_overlap(plan: SearchPlan, candidate: SearchCandidate) -> float:
-    model_values = [value for key, value in plan.identity_attributes.items() if "model" in key]
+    model_values = [
+        value for key, value in plan.identity_attributes.items() if "model" in key
+    ]
     if not model_values:
         return 0.0
     compact_candidate = _compact(_candidate_text(candidate))
@@ -312,8 +317,7 @@ class UncertainMatchQueue:
         uncertainty = 1.0 - min(1.0, abs(probability - 0.5) * 2.0)
         title_similarity = _token_similarity(plan.canonical_name, candidate.title)
         priority = min(1.0, 0.75 * uncertainty + 0.25 * title_similarity)
-        key = (candidate.marketplace, candidate.listing_id, candidate.variation_id)
-        self._items[key] = UncertainMatch(
+        self._items[_candidate_key(candidate)] = UncertainMatch(
             product_name=plan.canonical_name,
             candidate=candidate,
             probability=probability,
@@ -321,8 +325,13 @@ class UncertainMatchQueue:
             source_queries=source_queries,
         )
 
+    def discard(self, candidate: SearchCandidate) -> None:
+        self._items.pop(_candidate_key(candidate), None)
+
     def items(self) -> tuple[UncertainMatch, ...]:
-        return tuple(sorted(self._items.values(), key=lambda item: item.priority, reverse=True))
+        return tuple(
+            sorted(self._items.values(), key=lambda item: item.priority, reverse=True)
+        )
 
 
 class OnlineMatchModel:
@@ -370,6 +379,10 @@ class QueryPerformance:
     verified_matches: set[str] = field(default_factory=set)
     verified_rejects: set[str] = field(default_factory=set)
 
+    @property
+    def verified_count(self) -> int:
+        return len(self.verified_matches) + len(self.verified_rejects)
+
 
 class QueryPerformanceTracker:
     def __init__(self) -> None:
@@ -413,6 +426,44 @@ class QueryPerformanceTracker:
     def rank(self, queries: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(sorted(queries, key=lambda query: self.score(query), reverse=True))
 
+    def select_alias(
+        self,
+        aliases: tuple[str, ...],
+        *,
+        slot: int,
+        explore_every: int = 4,
+    ) -> str | None:
+        if slot < 0:
+            raise ValueError("slot must be non-negative")
+        if explore_every <= 0:
+            raise ValueError("explore_every must be positive")
+        if not aliases:
+            return None
+
+        normalized = tuple(normalize_query(alias) for alias in aliases)
+        stats = [self._stats.get(alias) for alias in normalized]
+        cold_indexes = [
+            index for index, item in enumerate(stats) if item is None or item.runs == 0
+        ]
+        if cold_indexes:
+            index = cold_indexes[slot % len(cold_indexes)]
+            return normalized[index]
+
+        if not any(item is not None and item.verified_count > 0 for item in stats):
+            return normalized[slot % len(normalized)]
+
+        if (slot + 1) % explore_every == 0:
+            min_runs = min(item.runs for item in stats if item is not None)
+            least_used = [
+                index
+                for index, item in enumerate(stats)
+                if item is not None and item.runs == min_runs
+            ]
+            index = least_used[slot % len(least_used)]
+            return normalized[index]
+
+        return self.rank(normalized)[0]
+
 
 class HybridMatchEngine:
     def __init__(
@@ -429,6 +480,9 @@ class HybridMatchEngine:
         self.model = model or OnlineMatchModel()
         self.uncertain_queue = UncertainMatchQueue()
         self.hard_negatives: list[HardNegative] = []
+        self._hard_negative_keys: set[
+            tuple[str, str, str | None, HardNegativeBucket]
+        ] = set()
         self.evidence: list[LearningEvidence] = []
         self.query_performance = QueryPerformanceTracker()
 
@@ -459,13 +513,17 @@ class HybridMatchEngine:
 
     def _mine_hard_negative(
         self,
-        plan: SearchPlan,
         candidate: SearchCandidate,
         reason: str,
         bucket: HardNegativeBucket,
     ) -> None:
-        del plan
-        self.hard_negatives.append(HardNegative(candidate=candidate, bucket=bucket, reason=reason))
+        key = (*_candidate_key(candidate), bucket)
+        if key in self._hard_negative_keys:
+            return
+        self._hard_negative_keys.add(key)
+        self.hard_negatives.append(
+            HardNegative(candidate=candidate, bucket=bucket, reason=reason)
+        )
 
     def _hard_vetoes(
         self,
@@ -490,10 +548,11 @@ class HybridMatchEngine:
             reason = deterministic.reason
             if "excluded term matched:" in reason:
                 term = reason.split(":", 1)[1].strip()
-                if _canonical(term) in _ACCESSORY_TERMS:
-                    bucket = HardNegativeBucket.ACCESSORY
-                else:
-                    bucket = HardNegativeBucket.SIBLING_MODEL
+                bucket = (
+                    HardNegativeBucket.ACCESSORY
+                    if _canonical(term) in _ACCESSORY_TERMS
+                    else HardNegativeBucket.SIBLING_MODEL
+                )
                 vetoes.append((reason, bucket))
             elif "identity attribute contradiction" in reason:
                 key = reason.split(" for ", 1)[1].split(":", 1)[0]
@@ -511,9 +570,10 @@ class HybridMatchEngine:
         unique: list[tuple[str, HardNegativeBucket]] = []
         seen: set[str] = set()
         for reason, bucket in vetoes:
-            if reason not in seen:
-                unique.append((reason, bucket))
-                seen.add(reason)
+            if reason in seen:
+                continue
+            unique.append((reason, bucket))
+            seen.add(reason)
         return tuple(unique)
 
     def classify(
@@ -529,7 +589,7 @@ class HybridMatchEngine:
         vetoes = self._hard_vetoes(plan, candidate, deterministic, taxonomy_status)
         if vetoes:
             for reason, bucket in vetoes:
-                self._mine_hard_negative(plan, candidate, reason, bucket)
+                self._mine_hard_negative(candidate, reason, bucket)
             return HybridMatchDecision(
                 status=MatchStatus.REJECT,
                 probability=0.0,
@@ -593,6 +653,8 @@ class HybridMatchEngine:
     ) -> None:
         if source is LearningEvidenceSource.SEARCH:
             raise ValueError("search evidence cannot train the online model")
+
+        self.uncertain_queue.discard(candidate)
         self.evidence.append(
             LearningEvidence(
                 product_name=plan.canonical_name,
