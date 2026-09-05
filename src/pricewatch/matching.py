@@ -12,6 +12,26 @@ _UNIT_PATTERNS = (
     (r"(\d+(?:[.,]\d+)?)\s*(?:тб|tb|терабайт(?:а|ов)?)\b", r"\1 tb"),
     (r"(\d+(?:[.,]\d+)?)\s*(?:мб|mb|мегабайт(?:а|ов)?)\b", r"\1 mb"),
 )
+_MODEL_SUFFIX_MARKERS = frozenset(
+    {
+        "pro",
+        "max",
+        "ultra",
+        "plus",
+        "lite",
+        "mini",
+        "air",
+        "se",
+        "fe",
+        "neo",
+        "про",
+        "макс",
+        "ультра",
+        "плюс",
+        "лайт",
+        "мини",
+    }
+)
 
 
 class MatchStatus(StrEnum):
@@ -58,6 +78,30 @@ def _excluded_present(text: str, expression: str) -> bool:
     return " " in needle and _compact(needle) in _compact(haystack)
 
 
+def _model_suffix_conflict(plan: SearchPlan, title: str) -> str | None:
+    """Reject a sibling model when detail title extends the exact model with a variant."""
+
+    expected = plan.identity_attributes.get("model")
+    if expected is None:
+        return None
+    expected_tokens = _canonical_text(expected).split()
+    title_tokens = _canonical_text(title).split()
+    if not expected_tokens or len(title_tokens) <= len(expected_tokens):
+        return None
+
+    width = len(expected_tokens)
+    for index in range(len(title_tokens) - width + 1):
+        if title_tokens[index : index + width] != expected_tokens:
+            continue
+        suffix_index = index + width
+        if suffix_index >= len(title_tokens):
+            continue
+        suffix = title_tokens[suffix_index]
+        if suffix in _MODEL_SUFFIX_MARKERS:
+            return f"identity attribute contradiction for model: unexpected {suffix} variant"
+    return None
+
+
 def match_candidate(plan: SearchPlan, candidate: SearchCandidate) -> MatchDecision:
     title = _canonical_text(candidate.title)
     attributes = {
@@ -69,6 +113,10 @@ def match_candidate(plan: SearchPlan, candidate: SearchCandidate) -> MatchDecisi
     for excluded in plan.excluded_terms:
         if _excluded_present(combined, excluded):
             return MatchDecision(MatchStatus.REJECT, f"excluded term matched: {excluded}")
+
+    model_conflict = _model_suffix_conflict(plan, candidate.title)
+    if model_conflict is not None:
+        return MatchDecision(MatchStatus.REJECT, model_conflict)
 
     missing_required = [
         token
