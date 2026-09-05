@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from pricewatch.deals import evaluate_verified_price
-
 from pricewatch.prices import PriceEvent
 
 
