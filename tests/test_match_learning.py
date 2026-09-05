@@ -263,3 +263,20 @@ def test_alias_selector_explores_cold_queries_then_exploits_verified_winner() ->
     tracker.record_verified("alias two", "2", matched=True)
 
     assert tracker.select_alias(aliases, slot=2) == "alias two"
+
+
+def test_soft_model_cannot_hard_reject_deterministic_exact_identity() -> None:
+    engine = HybridMatchEngine()
+    engine.model.weights = {key: 0.0 for key in engine.model.weights}
+    engine.model.weights["intercept"] = -100.0
+
+    decision = engine.classify(
+        make_plan(),
+        exact_candidate("99"),
+        taxonomy_status=TaxonomyGateStatus.PASS,
+        source_queries=("xiaomi pad 7 8 256",),
+    )
+
+    assert decision.status is MatchStatus.AMBIGUOUS
+    assert decision.hard_vetoes == ()
+    assert engine.uncertain_queue.items()[0].candidate.listing_id == "99"
