@@ -8,7 +8,6 @@ from pricewatch.learning_persistence import (
     decode_engine_state,
     encode_engine_state,
 )
-
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.match_learning import HybridMatchEngine, LearningEvidenceSource
 from pricewatch.search_plan import SearchPlan
