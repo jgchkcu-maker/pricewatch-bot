@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pricewatch}
+      POSTGRES_USER: ${POSTGRES_USER:-pricewatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pricewatch}
+    volumes:
+      - pricewatch-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pricewatch} -d ${POSTGRES_DB:-pricewatch}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  pricewatch-bot:
+    build: .
+    command: ["pricewatch-bot"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://pricewatch:pricewatch@postgres:5432/pricewatch}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  pricewatch-worker:
+    build: .
+    command: ["pricewatch-worker"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://pricewatch:pricewatch@postgres:5432/pricewatch}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pricewatch-postgres:
