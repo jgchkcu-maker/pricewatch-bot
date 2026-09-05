@@ -1,12 +1,12 @@
 import asyncio
 from decimal import Decimal
 
+from pricewatch.marketplaces import SearchCandidate
 from pricewatch.match_learning import (
     HardNegativeBucket,
     HybridMatchEngine,
     LearningEvidenceSource,
 )
-from pricewatch.marketplaces import SearchCandidate
 from pricewatch.scan import scan_once
 from pricewatch.search_plan import SearchPlan
 from pricewatch.taxonomy import MarketplaceTaxonomy, TaxonomyObservationAccumulator
