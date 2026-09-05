@@ -7,7 +7,9 @@ name = "pricewatch-bot"
 version = "0.1.0"
 description = "Universal high-frequency marketplace price radar core"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "httpx>=0.28,<1",
+]
 
 [project.optional-dependencies]
 dev = [
