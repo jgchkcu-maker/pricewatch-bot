@@ -205,3 +205,61 @@ def test_query_performance_prefers_verified_unique_yield_and_penalizes_rejects()
 
     assert tracker.score("good alias") > tracker.score("bad alias")
     assert tracker.rank(("bad alias", "good alias"))[0] == "good alias"
+
+
+def test_repeated_hard_negative_is_deduplicated() -> None:
+    engine = HybridMatchEngine()
+    candidate = SearchCandidate(
+        marketplace="wildberries",
+        listing_id="5",
+        title="Чехол для Xiaomi Pad 7 8/256",
+        taxonomy=MarketplaceTaxonomy(subject_id="203", entity="Чехлы"),
+    )
+
+    engine.classify(make_plan(), candidate)
+    engine.classify(make_plan(), candidate)
+
+    assert len(engine.hard_negatives) == 1
+
+
+def test_verified_label_removes_candidate_from_uncertain_queue() -> None:
+    engine = HybridMatchEngine()
+    candidate = SearchCandidate(
+        marketplace="wildberries",
+        listing_id="4",
+        title="Xiaomi Pad 7 256GB",
+        taxonomy=MarketplaceTaxonomy(subject_id="107", entity="Планшеты"),
+    )
+    decision = engine.classify(
+        make_plan(),
+        candidate,
+        taxonomy_status=TaxonomyGateStatus.PASS,
+        source_queries=("xiaomi pad 7 8 256",),
+    )
+    assert len(engine.uncertain_queue.items()) == 1
+
+    engine.learn_verified(
+        make_plan(),
+        candidate,
+        decision,
+        matched=False,
+        source=LearningEvidenceSource.DETAIL,
+        source_queries=("xiaomi pad 7 8 256",),
+    )
+
+    assert engine.uncertain_queue.items() == ()
+
+
+def test_alias_selector_explores_cold_queries_then_exploits_verified_winner() -> None:
+    tracker = QueryPerformanceTracker()
+    aliases = ("alias one", "alias two")
+
+    assert tracker.select_alias(aliases, slot=0) == "alias one"
+    tracker.record_discovery("alias one", candidate_ids={"1"}, accepted_ids={"1"})
+    assert tracker.select_alias(aliases, slot=1) == "alias two"
+
+    tracker.record_discovery("alias two", candidate_ids={"2"}, accepted_ids={"2"})
+    tracker.record_verified("alias one", "1", matched=False)
+    tracker.record_verified("alias two", "2", matched=True)
+
+    assert tracker.select_alias(aliases, slot=2) == "alias two"
