@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+
 from pricewatch.scheduled_runtime import run_scheduled_pass
 from pricewatch.webhook_runtime import TelegramWebhookService, WebhookUnauthorized
 
