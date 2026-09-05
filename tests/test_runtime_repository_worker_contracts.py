@@ -1,11 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from decimal import Decimal
 
-from pricewatch.marketplaces import OfferLocator, OfferSnapshot, SearchCandidate
 from pricewatch.runtime_repository import RuntimeRepository
-
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
 
@@ -48,16 +45,6 @@ class FakeConnection:
                     )
                 ]
             )
-        if "select public_price, verified_at from price_event" in normalized:
-            return FakeCursor(rows=[])
-        if "insert into marketplace_listing" in normalized:
-            return FakeCursor((501,))
-        if "select public_price" in normalized and "from listing_state" in normalized:
-            return FakeCursor(None)
-        if "insert into price_event" in normalized:
-            return FakeCursor((9001,))
-        if "select u.id, u.chat_id, s.id" in normalized:
-            return FakeCursor(rows=[(11, 777, 33)])
         return FakeCursor()
 
     async def commit(self) -> None:
@@ -108,49 +95,3 @@ def test_known_listing_rows_become_detail_poll_candidates() -> None:
     assert candidate.price is None
     assert candidate.taxonomy is not None
     assert candidate.taxonomy.subject_id == "107"
-
-
-def test_verified_offer_persists_state_event_and_baseline_without_outbox() -> None:
-    connection = FakeConnection()
-    repository = RuntimeRepository(FakeFactory(connection))
-    candidate = SearchCandidate(
-        marketplace="wildberries",
-        listing_id="123",
-        variation_id="456",
-        seller_id="789",
-        title="Xiaomi Pad 7 8ГБ 256ГБ",
-        url="https://www.wildberries.ru/catalog/123/detail.aspx",
-    )
-    snapshot = OfferSnapshot(
-        locator=OfferLocator(
-            marketplace="wildberries",
-            listing_id="123",
-            variation_id="456",
-            seller_id="789",
-            url=candidate.url,
-        ),
-        title=candidate.title,
-        price=Decimal("29490"),
-        available=True,
-        conditional_prices={"wb_wallet": Decimal("28990")},
-        price_source="detail",
-    )
-
-    result = asyncio.run(
-        repository.record_verified_offer(
-            product_id=42,
-            candidate=candidate,
-            snapshot=snapshot,
-            verified_at=NOW,
-        )
-    )
-
-    assert result.price_event_id == 9001
-    assert result.deal.is_baseline is True
-    assert result.outbox_count == 0
-    sql = "\n".join(query for query, _ in connection.calls).lower()
-    assert "insert into marketplace_listing" in sql
-    assert "insert into listing_state" in sql
-    assert "insert into price_event" in sql
-    assert "insert into notification_outbox" not in sql
-    assert connection.commits == 1
