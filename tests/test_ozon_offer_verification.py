@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from pricewatch.adapters.ozon import OzonSearchAdapter, parse_offer_payload
-from pricewatch.marketplaces import OfferIdentityError, OfferLocator, ParserDriftError, SearchRequest
+from pricewatch.marketplaces import (
+    OfferIdentityError,
+    OfferLocator,
+    ParserDriftError,
+    SearchRequest,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
