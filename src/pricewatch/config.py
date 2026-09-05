@@ -28,6 +28,17 @@ def _positive_int(env: Mapping[str, str], key: str, default: int) -> int:
     return value
 
 
+def _positive_int_with_fallback(
+    env: Mapping[str, str],
+    key: str,
+    fallback_key: str,
+    default: int,
+) -> int:
+    if key in env:
+        return _positive_int(env, key, default)
+    return _positive_int(env, fallback_key, default)
+
+
 def _positive_float(env: Mapping[str, str], key: str, default: float) -> float:
     raw = env.get(key)
     if raw is None:
@@ -70,12 +81,22 @@ class Settings:
             worker_id=worker_id,
             scan_interval_seconds=_positive_int(source, "SCAN_INTERVAL_SECONDS", 240),
             worker_batch_size=_positive_int(source, "WORKER_BATCH_SIZE", 20),
-            worker_lease_seconds=_positive_int(source, "WORKER_LEASE_SECONDS", 180),
+            worker_lease_seconds=_positive_int_with_fallback(
+                source,
+                "LEASE_SECONDS",
+                "WORKER_LEASE_SECONDS",
+                180,
+            ),
             marketplace_timeout_seconds=_positive_float(
                 source,
                 "MARKETPLACE_TIMEOUT_SECONDS",
                 20.0,
             ),
             outbox_batch_size=_positive_int(source, "OUTBOX_BATCH_SIZE", 50),
-            poll_timeout_seconds=_positive_int(source, "TELEGRAM_POLL_TIMEOUT_SECONDS", 30),
+            poll_timeout_seconds=_positive_int_with_fallback(
+                source,
+                "TELEGRAM_POLL_TIMEOUT",
+                "TELEGRAM_POLL_TIMEOUT_SECONDS",
+                30,
+            ),
         )
