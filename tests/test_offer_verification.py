@@ -25,6 +25,19 @@ class FakeOfferAdapter:
         )
 
 
+class FakeLearningStore:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, HybridMatchEngine, object]] = []
+
+    async def save_verified_update(
+        self,
+        scope_key: str,
+        engine: HybridMatchEngine,
+        evidence: object,
+    ) -> None:
+        self.calls.append((scope_key, engine, evidence))
+
+
 def plan() -> SearchPlan:
     return SearchPlan(
         canonical_name="Xiaomi Pad 7 8/256",
@@ -168,3 +181,71 @@ def test_ambiguous_detail_does_not_poison_online_training() -> None:
 
     assert engine.model.weights == before
     assert len(engine.evidence) == 0
+
+
+def test_successful_detail_persists_verified_learning_update() -> None:
+    engine = HybridMatchEngine()
+    store = FakeLearningStore()
+
+    asyncio.run(
+        verify_candidate(
+            plan(),
+            search_candidate(),
+            FakeOfferAdapter("Xiaomi Pad7 8ГБ 256ГБ", Decimal("29490")),
+            match_engine=engine,
+            learning_store=store,
+            learning_scope_key="product:42",
+        )
+    )
+
+    assert len(store.calls) == 1
+    scope_key, persisted_engine, evidence = store.calls[0]
+    assert scope_key == "product:42"
+    assert persisted_engine is engine
+    assert evidence.verified_label is True
+
+
+def test_failed_detail_persists_verified_negative_before_raising() -> None:
+    engine = HybridMatchEngine()
+    store = FakeLearningStore()
+
+    try:
+        asyncio.run(
+            verify_candidate(
+                plan(),
+                search_candidate(),
+                FakeOfferAdapter("Xiaomi Pad 7 Pro 8ГБ 256ГБ", Decimal("19990")),
+                match_engine=engine,
+                learning_store=store,
+                learning_scope_key="product:42",
+            )
+        )
+    except OfferIdentityError:
+        pass
+    else:
+        raise AssertionError("mismatched detail card must not become a verified offer")
+
+    assert len(store.calls) == 1
+    assert store.calls[0][2].verified_label is False
+
+
+def test_learning_store_and_scope_key_must_be_provided_together() -> None:
+    store = FakeLearningStore()
+
+    for kwargs in (
+        {"learning_store": store},
+        {"learning_scope_key": "product:42"},
+    ):
+        try:
+            asyncio.run(
+                verify_candidate(
+                    plan(),
+                    search_candidate(),
+                    FakeOfferAdapter("Xiaomi Pad7 8ГБ 256ГБ", Decimal("29490")),
+                    **kwargs,
+                )
+            )
+        except ValueError as exc:
+            assert "learning" in str(exc).lower()
+        else:
+            raise AssertionError("partial learning persistence configuration must fail")
