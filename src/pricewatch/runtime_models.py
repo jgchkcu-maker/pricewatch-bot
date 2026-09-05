@@ -89,3 +89,4 @@ class UserProductSummary:
     marketplace: str | None = None
     listing_url: str | None = None
     verified_at: datetime | None = None
+    seven_day_min_price: str | None = None
