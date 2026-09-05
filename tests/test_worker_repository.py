@@ -104,10 +104,10 @@ def test_claim_due_products_uses_skip_locked_and_upserts_short_lease() -> None:
     assert connection.commits == 1
 
 
-def test_known_listings_restore_attributes_and_taxonomy() -> None:
+def test_list_known_candidates_restores_attributes_and_taxonomy() -> None:
     repository = PostgresWorkerRepository(FakeFactory(FakeConnection()))
 
-    listings = asyncio.run(repository.known_listings(42, "wildberries"))
+    listings = asyncio.run(repository.list_known_candidates(42, "wildberries"))
 
     assert len(listings) == 1
     listing = listings[0]
@@ -163,7 +163,7 @@ def test_verified_taxonomy_positive_is_append_only_evidence() -> None:
             lease_seconds=180,
         )
     )[0]
-    listing = asyncio.run(repository.known_listings(42, "wildberries"))[0]
+    listing = asyncio.run(repository.list_known_candidates(42, "wildberries"))[0]
 
     asyncio.run(repository.record_taxonomy_positive(product, listing))
 
