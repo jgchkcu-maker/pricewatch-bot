@@ -28,6 +28,18 @@ def _normalized_tuple(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _identity_attributes(values: Mapping[str, str]) -> dict[str, str]:
+    """Normalize identity keys while preserving human-readable value formatting."""
+
+    result: dict[str, str] = {}
+    for key, value in values.items():
+        normalized_key = normalize_query(key)
+        display_value = unicodedata.normalize("NFKC", value).strip()
+        if normalized_key and normalize_query(display_value):
+            result[normalized_key] = display_value
+    return result
+
+
 @dataclass(frozen=True, slots=True)
 class SearchPlan:
     canonical_name: str
@@ -51,11 +63,7 @@ class SearchPlan:
         aliases = tuple(alias for alias in _normalized_tuple(self.aliases) if alias != primary)
         required_tokens = _normalized_tuple(self.required_tokens)
         excluded_terms = _normalized_tuple(self.excluded_terms)
-        identity_attributes = {
-            normalize_query(key): normalize_query(value)
-            for key, value in self.identity_attributes.items()
-            if normalize_query(key) and normalize_query(value)
-        }
+        identity_attributes = _identity_attributes(self.identity_attributes)
 
         object.__setattr__(self, "canonical_name", canonical_name)
         object.__setattr__(self, "primary_query", primary)
