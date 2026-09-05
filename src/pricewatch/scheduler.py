@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from collections.abc import Iterable
 
 
 def _require_aware(value: datetime) -> None:
