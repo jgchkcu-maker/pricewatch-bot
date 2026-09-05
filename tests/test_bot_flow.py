@@ -173,6 +173,16 @@ def callback(data: str) -> dict[str, object]:
     }
 
 
+def create_confirmed_app() -> tuple[FakeRepository, FakeTelegram, TelegramBotApp, int]:
+    repository = FakeRepository()
+    telegram = FakeTelegram()
+    app = TelegramBotApp(repository=repository, plan_provider=FakePlanProvider(), telegram=telegram)
+    asyncio.run(app.handle_update(message("Xiaomi Pad 7 8/256")))
+    confirmation_id = next(iter(repository.pending))
+    asyncio.run(app.handle_update(callback(f"confirm:{confirmation_id}")))
+    return repository, telegram, app, next(iter(repository.subscriptions))
+
+
 def test_start_then_free_text_creates_durable_confirmation_without_marketplace_wait() -> None:
     repository = FakeRepository()
     telegram = FakeTelegram()
@@ -191,13 +201,7 @@ def test_start_then_free_text_creates_durable_confirmation_without_marketplace_w
 
 
 def test_confirm_subscribes_and_second_user_identity_would_reuse_global_product() -> None:
-    repository = FakeRepository()
-    telegram = FakeTelegram()
-    app = TelegramBotApp(repository=repository, plan_provider=FakePlanProvider(), telegram=telegram)
-    asyncio.run(app.handle_update(message("Xiaomi Pad 7 8/256")))
-    confirmation_id = next(iter(repository.pending))
-
-    asyncio.run(app.handle_update(callback(f"confirm:{confirmation_id}")))
+    repository, telegram, _, _ = create_confirmed_app()
 
     assert len(repository.products) == 1
     assert len(repository.subscriptions) == 1
@@ -205,14 +209,54 @@ def test_confirm_subscribes_and_second_user_identity_would_reuse_global_product(
     assert "Ищу актуальные предложения" in telegram.messages[-1][1]
 
 
-def test_pause_resume_only_operates_on_current_users_subscription() -> None:
+def test_correction_creates_no_shared_product_and_next_text_is_new_pending_plan() -> None:
+    repository = FakeRepository()
+    telegram = FakeTelegram()
+    provider = FakePlanProvider()
+    app = TelegramBotApp(repository=repository, plan_provider=provider, telegram=telegram)
+    asyncio.run(app.handle_update(message("Xiaomi Pad 7 8/256")))
+    first_confirmation = next(iter(repository.pending))
+
+    asyncio.run(app.handle_update(callback(f"correct:{first_confirmation}")))
+    asyncio.run(app.handle_update(message("Xiaomi Pad 7 12/256")))
+
+    assert repository.products == {}
+    assert first_confirmation not in repository.pending
+    assert len(repository.pending) == 1
+    assert provider.calls == ["Xiaomi Pad 7 8/256", "Xiaomi Pad 7 12/256"]
+    assert "исправленное" in telegram.messages[-2][1].casefold()
+
+
+def test_cancel_consumes_pending_without_creating_product_or_subscription() -> None:
     repository = FakeRepository()
     telegram = FakeTelegram()
     app = TelegramBotApp(repository=repository, plan_provider=FakePlanProvider(), telegram=telegram)
     asyncio.run(app.handle_update(message("Xiaomi Pad 7 8/256")))
     confirmation_id = next(iter(repository.pending))
-    asyncio.run(app.handle_update(callback(f"confirm:{confirmation_id}")))
-    subscription_id = next(iter(repository.subscriptions))
+
+    asyncio.run(app.handle_update(callback(f"cancel:{confirmation_id}")))
+
+    assert repository.pending == {}
+    assert repository.products == {}
+    assert repository.subscriptions == {}
+    assert "отменено" in telegram.messages[-1][1].casefold()
+
+
+def test_my_products_product_card_and_history_callbacks() -> None:
+    _, telegram, app, subscription_id = create_confirmed_app()
+
+    asyncio.run(app.handle_update(callback("my")))
+    assert "📦 Отслеживается: 1" in telegram.messages[-1][1]
+
+    asyncio.run(app.handle_update(callback(f"product:{subscription_id}")))
+    assert "Отслеживание включено" in telegram.messages[-1][1]
+
+    asyncio.run(app.handle_update(callback(f"history:{subscription_id}")))
+    assert "последние 7 дней" in telegram.messages[-1][1]
+
+
+def test_pause_resume_only_operates_on_current_users_subscription() -> None:
+    repository, _, app, subscription_id = create_confirmed_app()
 
     asyncio.run(app.handle_update(callback(f"pause:{subscription_id}")))
     assert repository.subscriptions[subscription_id].status == "paused"
@@ -229,14 +273,37 @@ def test_pause_resume_only_operates_on_current_users_subscription() -> None:
     assert repository.subscriptions[999].status == "active"
 
 
-def test_correction_does_not_mutate_shared_product_identity() -> None:
+def test_my_products_pagination_callback_shows_second_page() -> None:
     repository = FakeRepository()
     telegram = FakeTelegram()
     app = TelegramBotApp(repository=repository, plan_provider=FakePlanProvider(), telegram=telegram)
-    asyncio.run(app.handle_update(message("Xiaomi Pad 7 8/256")))
-    confirmation_id = next(iter(repository.pending))
+    for index in range(10):
+        product_id = 100 + index
+        subscription_id = 200 + index
+        repository.products[product_id] = TrackedProductRecord(
+            id=product_id,
+            canonical_name=f"Product {index + 1}",
+            product_type="test",
+            identity_fingerprint=f"fp-{index}",
+            search_plan=SearchPlan(
+                canonical_name=f"Product {index + 1}",
+                primary_query=f"product {index + 1}",
+            ),
+            lifecycle_state="active",
+            subscriber_count=1,
+            next_scan_at=NOW,
+            last_successful_scan_at=None,
+        )
+        repository.subscriptions[subscription_id] = SubscriptionRecord(
+            id=subscription_id,
+            user_id=repository.user_id,
+            tracked_product_id=product_id,
+            status="active",
+        )
 
-    asyncio.run(app.handle_update(callback(f"correct:{confirmation_id}")))
+    asyncio.run(app.handle_update(callback("my")))
+    assert "my_page:1" in str(telegram.messages[-1][2])
 
-    assert repository.products == {}
-    assert "исправленное" in telegram.messages[-1][1].casefold()
+    asyncio.run(app.handle_update(callback("my_page:1")))
+    assert "9. Product 9" in telegram.messages[-1][1]
+    assert "10. Product 10" in telegram.messages[-1][1]
