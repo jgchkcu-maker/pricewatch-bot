@@ -32,9 +32,10 @@ Rules:
 6. primary_query must be the best natural high-precision marketplace query, concise and free of
    unnecessary punctuation. Prefer spaces over separators such as '/', '+', '-', or commas.
 7. Generate at most 7 aliases. Aliases must be semantically distinct ways real listings/searches
-   may express the same product: compact model spelling, common transliteration, common abbreviation,
-   or a known model code ONLY when that code is already present in the user query or certain from
-   the product name. Do not generate word-order permutations just to make the list longer.
+   may express the same product: compact model spelling, common transliteration,
+   common abbreviation, or a known model code ONLY when that code is already present in the user
+   query or certain from the product name. Do not generate word-order permutations just to make
+   the list longer.
 8. Never invent GTIN, EAN, UPC, SKU, MPN, article numbers, or manufacturer codes.
 9. Do not put used/refurbished/accessory variants into aliases for a new main product.
 10. Output JSON only. No markdown, explanation, comments, or extra keys.
