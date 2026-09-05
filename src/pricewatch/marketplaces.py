@@ -3,11 +3,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class ParserDriftError(ValueError):
     """Raised when a marketplace response no longer has the expected schema."""
+
+
+@dataclass(frozen=True, slots=True)
+class SearchRequest:
+    url: str
+    params: Mapping[str, str] = field(default_factory=dict)
+
+
+class JsonFetcher(Protocol):
+    async def get_json(self, request: SearchRequest) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +57,13 @@ class OfferSnapshot:
 class MarketplaceSearchAdapter(Protocol):
     marketplace: str
 
-    async def search(self, query: str, *, limit: int = 50) -> list[SearchCandidate]: ...
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+    ) -> list[SearchCandidate]: ...
 
 
 class MarketplaceOfferAdapter(Protocol):
