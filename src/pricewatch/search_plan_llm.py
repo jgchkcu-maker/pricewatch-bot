@@ -21,24 +21,30 @@ Rules:
 2. Do not add region as an identity attribute unless the user explicitly requested a region or
    the region word is literally part of the requested product identity.
 3. Put only truly identity-critical differentiators into identity_attributes. Examples vary by
-   product: model, generation, capacity, RAM, storage, size, socket, interface, edition, etc.
-   The schema is universal; keys are free-form lowercase semantic names.
-4. required_tokens are only stable lexical anchors that should normally be visible in a matching
+   product: brand, model, generation, capacity, RAM, storage, size, socket, interface, edition,
+   etc. When a brand is explicit or highly certain from the requested product name, preserve it
+   under the semantic key "brand". The schema is universal; keys are free-form lowercase names.
+4. If the user explicitly provides a GTIN, EAN, UPC, MPN, manufacturer part number, or equivalent
+   exact product identifier, preserve it verbatim in identity_attributes under the corresponding
+   lowercase semantic key. Exact identifiers are stronger identity evidence than title wording.
+5. required_tokens are only stable lexical anchors that should normally be visible in a matching
    result. Do not put formatting-sensitive expressions there when identity_attributes can express
    them better.
-5. excluded_terms contain obvious conflicting sibling models and accessory-only concepts that
+6. excluded_terms contain obvious conflicting sibling models and accessory-only concepts that
    would otherwise produce dangerous false positives. Be conservative: an exclusion is a hard
    rejection later.
-6. primary_query must be the best natural high-precision marketplace query, concise and free of
+7. primary_query must be the best natural high-precision marketplace query, concise and free of
    unnecessary punctuation. Prefer spaces over separators such as '/', '+', '-', or commas.
-7. Generate at most 7 aliases. Aliases must be semantically distinct ways real listings/searches
+8. Generate at most 7 aliases. Aliases must be semantically distinct ways real listings/searches
    may express the same product: compact model spelling, common transliteration,
    common abbreviation, or a known model code ONLY when that code is already present in the user
    query or certain from the product name. Do not generate word-order permutations just to make
    the list longer.
-8. Never invent GTIN, EAN, UPC, SKU, MPN, article numbers, or manufacturer codes.
-9. Do not put used/refurbished/accessory variants into aliases for a new main product.
-10. Output JSON only. No markdown, explanation, comments, or extra keys.
+9. Never invent GTIN, EAN, UPC, SKU, MPN, article numbers, or manufacturer codes. If an exact
+   identifier was not supplied or cannot be known with very high certainty from the product name,
+   omit it instead of guessing.
+10. Do not put used/refurbished/accessory variants into aliases for a new main product.
+11. Output JSON only. No markdown, explanation, comments, or extra keys.
 
 Required JSON object:
 {
