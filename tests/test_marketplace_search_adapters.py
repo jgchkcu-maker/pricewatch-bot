@@ -51,6 +51,35 @@ def test_ozon_adapter_builds_composer_search_request() -> None:
     assert request.params == {"url": "/search/?text=xiaomi pad 7 8 256&page=3"}
 
 
+def test_ozon_adapter_uses_category_scope_when_supplied() -> None:
+    fetcher = RecordingFetcher(fixture("ozon_search_minimal.json"))
+    adapter = OzonSearchAdapter(fetcher)
+
+    asyncio.run(
+        adapter.search(
+            "xiaomi pad 7 8 256",
+            category_path="/category/planshety-15525/",
+            page=2,
+        )
+    )
+
+    request = fetcher.requests[0]
+    assert request.params == {
+        "url": "/category/planshety-15525/?text=xiaomi pad 7 8 256&page=2"
+    }
+
+
+def test_ozon_adapter_rejects_arbitrary_category_scope() -> None:
+    adapter = OzonSearchAdapter(RecordingFetcher(fixture("ozon_search_minimal.json")))
+
+    try:
+        asyncio.run(adapter.search("x", category_path="https://evil.example/x"))
+    except ValueError as exc:
+        assert "category" in str(exc)
+    else:
+        raise AssertionError("arbitrary category path must fail")
+
+
 def test_search_adapters_enforce_positive_page_and_limit() -> None:
     wb = WildberriesSearchAdapter(RecordingFetcher({"products": []}))
     ozon = OzonSearchAdapter(RecordingFetcher({"widgetStates": {}}))
