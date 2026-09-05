@@ -135,7 +135,7 @@ class PostgresOutboxStore:
     ) -> None:
         delay = retry_after_seconds
         if delay is None:
-            delay = min(3600, 30 * (2 ** min(item.attempt_count, 6)))
+            delay = min(3600, 30 * (2 ** min(item.attempt_count, 10)))
         delay = max(1, delay)
         next_attempt = now + timedelta(seconds=delay)
         async with self._connection_factory() as connection:
