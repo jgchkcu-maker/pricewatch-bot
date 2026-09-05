@@ -12,6 +12,7 @@ from pricewatch.marketplaces import (
     SearchCandidate,
     SearchRequest,
 )
+from pricewatch.taxonomy import MarketplaceTaxonomy
 
 _WB_SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v9/search"
 _WB_CARD_URL = "https://card.wb.ru/cards/v4/detail"
@@ -29,6 +30,19 @@ def _string(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _taxonomy(product: dict[str, Any]) -> MarketplaceTaxonomy | None:
+    subject_id = _string(product.get("subjectId"))
+    parent_id = _string(product.get("subjectParentId"))
+    entity = _string(product.get("entity"))
+    if not subject_id and not parent_id and not entity:
+        return None
+    return MarketplaceTaxonomy(
+        subject_id=subject_id,
+        parent_id=parent_id,
+        entity=entity,
+    )
 
 
 def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
@@ -57,6 +71,7 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
         total_quantity = product.get("totalQuantity")
         available = total_quantity > 0 if isinstance(total_quantity, int | float) else None
         attributes = {"brand": brand} if brand else {}
+        taxonomy = _taxonomy(product)
         url = f"https://www.wildberries.ru/catalog/{listing_id}/detail.aspx"
 
         sizes = product.get("sizes")
@@ -72,6 +87,7 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
                     listing_id=listing_id,
                     title=title,
                     attributes=attributes,
+                    taxonomy=taxonomy,
                     url=url,
                     seller_id=seller_id,
                     seller_name=seller_name,
@@ -97,6 +113,7 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
                     variation_id=_string(size.get("optionId")),
                     title=title,
                     attributes=attributes,
+                    taxonomy=taxonomy,
                     url=url,
                     seller_id=seller_id,
                     seller_name=seller_name,
@@ -159,11 +176,14 @@ class WildberriesSearchAdapter:
         *,
         limit: int = 50,
         page: int = 1,
+        category_path: str | None = None,
     ) -> list[SearchCandidate]:
         if limit <= 0:
             raise ValueError("limit must be positive")
         if page <= 0:
             raise ValueError("page must be positive")
+        if category_path is not None:
+            raise ValueError("Wildberries does not use Ozon-style category paths")
 
         request = SearchRequest(
             url=_WB_SEARCH_URL,
