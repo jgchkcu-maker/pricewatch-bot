@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from pricewatch.taxonomy import MarketplaceTaxonomy
 
 
 class ParserDriftError(ValueError):
@@ -30,6 +33,7 @@ class SearchCandidate:
     listing_id: str
     title: str
     attributes: Mapping[str, str] = field(default_factory=dict)
+    taxonomy: MarketplaceTaxonomy | None = None
     url: str | None = None
     variation_id: str | None = None
     seller_id: str | None = None
@@ -70,6 +74,7 @@ class MarketplaceSearchAdapter(Protocol):
         *,
         limit: int = 50,
         page: int = 1,
+        category_path: str | None = None,
     ) -> list[SearchCandidate]: ...
 
 
