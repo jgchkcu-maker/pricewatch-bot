@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Mapping
 import unicodedata
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 
 def normalize_query(text: str) -> str:
@@ -42,11 +42,7 @@ class SearchPlan:
         if not primary:
             raise ValueError("primary_query must contain searchable characters")
 
-        aliases = tuple(
-            alias
-            for alias in _normalized_tuple(self.aliases)
-            if alias != primary
-        )
+        aliases = tuple(alias for alias in _normalized_tuple(self.aliases) if alias != primary)
         required_tokens = _normalized_tuple(self.required_tokens)
         excluded_terms = _normalized_tuple(self.excluded_terms)
         identity_attributes = {
