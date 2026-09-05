@@ -90,6 +90,11 @@ def test_verified_learning_survives_state_round_trip() -> None:
         title="Xiaomi Pad 7 8GB 256GB",
         attributes={"model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
     )
+    engine.query_performance.record_discovery(
+        "xiaomi pad7 8 256",
+        candidate_ids={"40"},
+        accepted_ids={"40"},
+    )
     decision = engine.classify(plan(), candidate)
     engine.learn_verified(
         plan(),
