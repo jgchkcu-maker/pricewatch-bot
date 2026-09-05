@@ -3,9 +3,18 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from pricewatch.marketplaces import JsonFetcher, ParserDriftError, SearchCandidate, SearchRequest
+from pricewatch.marketplaces import (
+    JsonFetcher,
+    OfferIdentityError,
+    OfferLocator,
+    OfferSnapshot,
+    ParserDriftError,
+    SearchCandidate,
+    SearchRequest,
+)
 
 _WB_SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v9/search"
+_WB_CARD_URL = "https://card.wb.ru/cards/v4/detail"
 
 
 def _kopecks_to_rubles(value: object) -> Decimal | None:
@@ -23,11 +32,10 @@ def _string(value: object) -> str | None:
 
 
 def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
-    """Parse a Wildberries catalog search response into neutral candidates.
+    """Parse a Wildberries catalog/card response into neutral candidates.
 
-    WB search currently returns product cards in the top-level ``products`` list.
-    Each ``sizes`` entry can carry its own option id and price, so we preserve it
-    as a separate variation candidate instead of silently collapsing variants.
+    WB product payloads currently expose product-level data plus one or more
+    ``sizes`` options. Each option remains a separate variation candidate.
     """
     products = payload.get("products")
     if not isinstance(products, list):
@@ -102,6 +110,42 @@ def parse_search_payload(payload: dict[str, Any]) -> list[SearchCandidate]:
     return candidates
 
 
+def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> OfferSnapshot:
+    candidates = parse_search_payload(payload)
+    matching = [candidate for candidate in candidates if candidate.listing_id == locator.listing_id]
+
+    if locator.variation_id is not None:
+        matching = [
+            candidate for candidate in matching if candidate.variation_id == locator.variation_id
+        ]
+
+    if locator.seller_id is not None:
+        matching = [
+            candidate
+            for candidate in matching
+            if candidate.seller_id is None or candidate.seller_id == locator.seller_id
+        ]
+
+    if len(matching) != 1:
+        raise OfferIdentityError(
+            "Wildberries card did not resolve to exactly one requested offer variation"
+        )
+
+    candidate = matching[0]
+    if candidate.price is None:
+        raise ParserDriftError("Wildberries verified card candidate has no product price")
+
+    return OfferSnapshot(
+        locator=locator,
+        title=candidate.title,
+        price=candidate.price,
+        available=bool(candidate.available),
+        attributes=candidate.attributes,
+        original_price=candidate.original_price,
+        price_source="card",
+    )
+
+
 class WildberriesSearchAdapter:
     marketplace = "wildberries"
 
@@ -136,3 +180,21 @@ class WildberriesSearchAdapter:
         )
         payload = await self._fetcher.get_json(request)
         return parse_search_payload(payload)[:limit]
+
+    async def fetch_offer(self, locator: OfferLocator) -> OfferSnapshot:
+        if locator.marketplace != self.marketplace:
+            raise ValueError("offer locator marketplace does not match Wildberries adapter")
+
+        request = SearchRequest(
+            url=_WB_CARD_URL,
+            params={
+                "appType": "1",
+                "curr": "rub",
+                "dest": self._dest,
+                "locale": "ru",
+                "spp": "30",
+                "nm": locator.listing_id,
+            },
+        )
+        payload = await self._fetcher.get_json(request)
+        return parse_offer_payload(payload, locator)
