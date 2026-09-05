@@ -8,6 +8,7 @@ from pricewatch.learning_persistence import (
     decode_engine_state,
     encode_engine_state,
 )
+
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.match_learning import HybridMatchEngine, LearningEvidenceSource
 from pricewatch.search_plan import SearchPlan
@@ -21,6 +22,7 @@ def plan() -> SearchPlan:
         product_type="tablet",
         aliases=("xiaomi pad7 8 256", "сяоми пад 7 8 256"),
         required_tokens=("xiaomi",),
+        excluded_terms=("case", "чехол"),
         identity_attributes={"model": "pad 7", "ram": "8 gb", "storage": "256 gb"},
     )
 
@@ -64,6 +66,7 @@ def test_engine_state_round_trip_preserves_learned_runtime_state() -> None:
     engine.query_performance.record_verified("xiaomi pad7 8 256", "11", matched=True)
     engine.classify(plan(), accessory_candidate())
     before_weights = dict(engine.model.weights)
+    before_alias = engine.query_performance.select_alias(plan().aliases, slot=2)
 
     payload = encode_engine_state(engine)
     restored = decode_engine_state(payload)
@@ -73,7 +76,7 @@ def test_engine_state_round_trip_preserves_learned_runtime_state() -> None:
     assert restored.query_performance.score("xiaomi pad7 8 256") == engine.query_performance.score(
         "xiaomi pad7 8 256"
     )
-    assert restored.query_performance.select_alias(plan().aliases, slot=2) == "xiaomi pad7 8 256"
+    assert restored.query_performance.select_alias(plan().aliases, slot=2) == before_alias
     assert len(restored.uncertain_queue.items()) == 1
     assert restored.uncertain_queue.items()[0].candidate.listing_id == "10"
     assert len(restored.hard_negatives) == 1
