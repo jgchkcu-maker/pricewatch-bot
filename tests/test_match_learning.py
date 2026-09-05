@@ -4,6 +4,7 @@ from pricewatch.match_learning import (
     LearningEvidenceSource,
     QueryPerformanceTracker,
 )
+
 from pricewatch.marketplaces import SearchCandidate
 from pricewatch.matching import MatchStatus
 from pricewatch.search_plan import SearchPlan
