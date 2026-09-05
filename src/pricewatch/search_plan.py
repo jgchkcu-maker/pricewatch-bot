@@ -32,16 +32,22 @@ def _normalized_tuple(values: tuple[str, ...]) -> tuple[str, ...]:
 class SearchPlan:
     canonical_name: str
     primary_query: str
+    product_type: str | None = None
     aliases: tuple[str, ...] = ()
     required_tokens: tuple[str, ...] = ()
     excluded_terms: tuple[str, ...] = ()
     identity_attributes: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        canonical_name = self.canonical_name.strip()
+        if not canonical_name:
+            raise ValueError("canonical_name must not be empty")
+
         primary = normalize_query(self.primary_query)
         if not primary:
             raise ValueError("primary_query must contain searchable characters")
 
+        product_type = normalize_query(self.product_type) if self.product_type else None
         aliases = tuple(alias for alias in _normalized_tuple(self.aliases) if alias != primary)
         required_tokens = _normalized_tuple(self.required_tokens)
         excluded_terms = _normalized_tuple(self.excluded_terms)
@@ -51,8 +57,9 @@ class SearchPlan:
             if normalize_query(key) and normalize_query(value)
         }
 
-        object.__setattr__(self, "canonical_name", self.canonical_name.strip())
+        object.__setattr__(self, "canonical_name", canonical_name)
         object.__setattr__(self, "primary_query", primary)
+        object.__setattr__(self, "product_type", product_type)
         object.__setattr__(self, "aliases", aliases)
         object.__setattr__(self, "required_tokens", required_tokens)
         object.__setattr__(self, "excluded_terms", excluded_terms)
