@@ -17,6 +17,8 @@ def test_settings_require_core_secrets_and_keep_conservative_defaults() -> None:
     assert settings.gemini_model == DEFAULT_SEARCH_PLAN_MODEL
     assert settings.scan_interval_seconds == 240
     assert settings.worker_batch_size == 20
+    assert settings.worker_lease_seconds == 180
+    assert settings.poll_timeout_seconds == 30
     assert settings.marketplace_timeout_seconds == 20.0
     assert settings.outbox_batch_size == 50
 
@@ -29,6 +31,8 @@ def test_settings_accept_runtime_overrides() -> None:
             "SCAN_INTERVAL_SECONDS": "300",
             "WORKER_BATCH_SIZE": "7",
             "WORKER_ID": "worker-a",
+            "LEASE_SECONDS": "90",
+            "TELEGRAM_POLL_TIMEOUT": "25",
         }
     )
     settings = Settings.from_env(env)
@@ -37,6 +41,23 @@ def test_settings_accept_runtime_overrides() -> None:
     assert settings.scan_interval_seconds == 300
     assert settings.worker_batch_size == 7
     assert settings.worker_id == "worker-a"
+    assert settings.worker_lease_seconds == 90
+    assert settings.poll_timeout_seconds == 25
+
+
+def test_legacy_runtime_names_remain_backward_compatible() -> None:
+    env = base_env()
+    env.update(
+        {
+            "WORKER_LEASE_SECONDS": "120",
+            "TELEGRAM_POLL_TIMEOUT_SECONDS": "15",
+        }
+    )
+
+    settings = Settings.from_env(env)
+
+    assert settings.worker_lease_seconds == 120
+    assert settings.poll_timeout_seconds == 15
 
 
 def test_settings_fail_fast_on_missing_or_invalid_required_values() -> None:
