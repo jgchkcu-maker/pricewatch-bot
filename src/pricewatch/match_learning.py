@@ -68,6 +68,13 @@ def _candidate_text(candidate: SearchCandidate) -> str:
     return " ".join((candidate.title, *candidate.attributes.values()))
 
 
+def _normalized_attributes(candidate: SearchCandidate) -> dict[str, str]:
+    return {
+        normalize_query(key): _canonical(value)
+        for key, value in candidate.attributes.items()
+    }
+
+
 def _token_similarity(left: str, right: str) -> float:
     left_tokens = set(_canonical(left).split())
     right_tokens = set(_canonical(right).split())
@@ -120,7 +127,7 @@ def _variant_unit_conflict(plan: SearchPlan, candidate: SearchCandidate) -> str 
 
 
 def _identifier_conflict(plan: SearchPlan, candidate: SearchCandidate) -> str | None:
-    attributes = {normalize_query(key): _canonical(value) for key, value in candidate.attributes.items()}
+    attributes = _normalized_attributes(candidate)
     for key in _IDENTIFIER_KEYS:
         expected = plan.identity_attributes.get(key)
         actual = attributes.get(key)
@@ -132,7 +139,7 @@ def _identifier_conflict(plan: SearchPlan, candidate: SearchCandidate) -> str | 
 
 
 def _identifier_match(plan: SearchPlan, candidate: SearchCandidate) -> float:
-    attributes = {normalize_query(key): _canonical(value) for key, value in candidate.attributes.items()}
+    attributes = _normalized_attributes(candidate)
     compared = 0
     matched = 0
     for key in _IDENTIFIER_KEYS:
@@ -157,7 +164,7 @@ def _coverage(values: tuple[str, ...] | list[str], text: str) -> float:
 def _identity_coverage(plan: SearchPlan, candidate: SearchCandidate) -> float:
     if not plan.identity_attributes:
         return 1.0
-    attributes = {normalize_query(key): _canonical(value) for key, value in candidate.attributes.items()}
+    attributes = _normalized_attributes(candidate)
     combined = _candidate_text(candidate)
     matched = 0
     for key, expected in plan.identity_attributes.items():
