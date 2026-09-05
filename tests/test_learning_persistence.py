@@ -140,7 +140,7 @@ class FakeConnection:
     ) -> FakeCursor:
         self.calls.append((query, params))
         normalized = " ".join(query.split()).lower()
-        if normalized.startswith("insert into") and params is not None:
+        if normalized.startswith("insert into pricewatch_learning_state") and params is not None:
             self.saved_payload = str(params[2])
         if normalized.startswith("select") and self.saved_payload is not None:
             return FakeCursor((LEARNING_STATE_SCHEMA_VERSION, self.saved_payload))
@@ -172,4 +172,45 @@ def test_postgres_store_initializes_saves_and_loads_versioned_state() -> None:
     assert connection.commits == 2
     sql = "\n".join(query for query, _ in connection.calls).lower()
     assert "create table if not exists pricewatch_learning_state" in sql
+    assert "create table if not exists pricewatch_learning_evidence" in sql
     assert "on conflict (scope_key) do update" in sql
+
+
+def test_postgres_store_appends_only_verified_provenance() -> None:
+    connection = FakeConnection()
+    store = PostgresLearningStateStore(FakeFactory(connection))
+    engine = HybridMatchEngine()
+    candidate = SearchCandidate(
+        marketplace="wildberries",
+        listing_id="50",
+        title="Xiaomi Pad 7 8GB 256GB",
+        attributes={"model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
+    )
+    decision = engine.classify(plan(), candidate)
+    engine.learn_verified(
+        plan(),
+        candidate,
+        decision,
+        matched=True,
+        source=LearningEvidenceSource.DETAIL,
+        source_queries=("xiaomi pad7 8 256",),
+    )
+    verified = engine.evidence[-1]
+
+    asyncio.run(store.append_verified_evidence("product:42", verified))
+
+    sql = "\n".join(query for query, _ in connection.calls).lower()
+    assert "insert into pricewatch_learning_evidence" in sql
+    assert connection.commits == 1
+
+    search_engine = HybridMatchEngine()
+    search_decision = search_engine.classify(plan(), candidate)
+    search_engine.record_search_evidence(plan(), candidate, search_decision)
+    try:
+        asyncio.run(
+            store.append_verified_evidence("product:42", search_engine.evidence[-1])
+        )
+    except ValueError as exc:
+        assert "verified" in str(exc).lower()
+    else:
+        raise AssertionError("search-only evidence must not be persisted as verified provenance")
