@@ -2,7 +2,11 @@ import asyncio
 from datetime import UTC, datetime
 
 from pricewatch.bot import TelegramBotApp
-from pricewatch.runtime_models import SubscriptionRecord, TrackedProductRecord, UserProductSummary
+from pricewatch.runtime_models import (
+    SubscriptionRecord,
+    TrackedProductRecord,
+    UserProductSummary,
+)
 from pricewatch.search_plan import SearchPlan
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
@@ -13,7 +17,12 @@ def plan() -> SearchPlan:
         canonical_name="Xiaomi Pad 7 8/256",
         primary_query="xiaomi pad 7 8 256",
         product_type="tablet",
-        identity_attributes={"brand": "Xiaomi", "model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
+        identity_attributes={
+            "brand": "Xiaomi",
+            "model": "Pad 7",
+            "ram": "8 GB",
+            "storage": "256 GB",
+        },
     )
 
 
