@@ -124,3 +124,24 @@ def test_failed_detail_identity_recheck_records_verified_negative() -> None:
     evidence = engine.evidence[-1]
     assert evidence.source is LearningEvidenceSource.DETAIL
     assert evidence.verified_label is False
+
+
+def test_verified_detail_identity_overrides_uncalibrated_probability() -> None:
+    engine = HybridMatchEngine()
+    engine.model.weights = {key: 0.0 for key in engine.model.weights}
+    engine.model.weights["intercept"] = -100.0
+
+    snapshot = asyncio.run(
+        verify_candidate(
+            plan(),
+            search_candidate(),
+            FakeOfferAdapter("Xiaomi Pad7 8ГБ 256ГБ", Decimal("29490")),
+            match_engine=engine,
+            source_queries=("xiaomi pad 7 8 256",),
+        )
+    )
+
+    assert snapshot.price == Decimal("29490")
+    evidence = engine.evidence[-1]
+    assert evidence.source is LearningEvidenceSource.DETAIL
+    assert evidence.verified_label is True
