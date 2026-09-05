@@ -6,6 +6,10 @@ from decimal import Decimal
 from typing import Protocol
 
 
+class ParserDriftError(ValueError):
+    """Raised when a marketplace response no longer has the expected schema."""
+
+
 @dataclass(frozen=True, slots=True)
 class SearchCandidate:
     marketplace: str
@@ -13,6 +17,13 @@ class SearchCandidate:
     title: str
     attributes: Mapping[str, str] = field(default_factory=dict)
     url: str | None = None
+    variation_id: str | None = None
+    seller_id: str | None = None
+    seller_name: str | None = None
+    price: Decimal | None = None
+    original_price: Decimal | None = None
+    available: bool | None = None
+    price_source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
