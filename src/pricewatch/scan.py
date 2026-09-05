@@ -4,13 +4,13 @@ from dataclasses import dataclass
 
 from pricewatch.marketplaces import MarketplaceSearchAdapter, SearchCandidate
 from pricewatch.matching import MatchStatus, match_candidate
-from pricewatch.search_plan import SearchPlan, query_for_cycle
+from pricewatch.search_plan import SearchPlan, queries_for_cycle
 
 
 @dataclass(frozen=True, slots=True)
 class ScanOutcome:
     marketplace: str
-    query: str
+    queries: tuple[str, ...]
     raw_count: int
     accepted: tuple[SearchCandidate, ...]
     ambiguous: tuple[SearchCandidate, ...]
@@ -34,12 +34,14 @@ async def scan_once(
     cycle: int,
     limit: int = 100,
 ) -> ScanOutcome:
-    """Run one cheap discovery scan and classify every unique search candidate."""
+    """Run one fast discovery scan and classify every unique search candidate."""
     if limit <= 0:
         raise ValueError("limit must be positive")
 
-    query = query_for_cycle(plan, cycle)
-    raw_candidates = await adapter.search(query, limit=limit)
+    queries = queries_for_cycle(plan, cycle)
+    raw_candidates: list[SearchCandidate] = []
+    for query in queries:
+        raw_candidates.extend(await adapter.search(query, limit=limit))
 
     unique_candidates: list[SearchCandidate] = []
     seen: set[tuple[str, str, str | None, str | None]] = set()
@@ -67,7 +69,7 @@ async def scan_once(
 
     return ScanOutcome(
         marketplace=adapter.marketplace,
-        query=query,
+        queries=queries,
         raw_count=len(raw_candidates),
         accepted=tuple(accepted),
         ambiguous=tuple(ambiguous),
