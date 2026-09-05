@@ -10,6 +10,10 @@ class ParserDriftError(ValueError):
     """Raised when a marketplace response no longer has the expected schema."""
 
 
+class OfferIdentityError(ValueError):
+    """A detail response could not verify the exact requested offer/variation."""
+
+
 @dataclass(frozen=True, slots=True)
 class SearchRequest:
     url: str
