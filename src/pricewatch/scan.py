@@ -35,6 +35,24 @@ def candidate_identity(candidate: SearchCandidate) -> tuple[str, str, str | None
     )
 
 
+def _queries_for_scan(
+    plan: SearchPlan,
+    cycle: int,
+    engine: HybridMatchEngine,
+) -> tuple[str, ...]:
+    scheduled = queries_for_cycle(plan, cycle)
+    if len(scheduled) == 1 or not plan.aliases:
+        return scheduled
+
+    # queries_for_cycle adds one alias every second cycle. Keep that cadence, but once verified
+    # evidence exists let the query learner choose the useful alias while still exploring.
+    alias_slot = (cycle + 1) // 2 - 1
+    selected = engine.query_performance.select_alias(plan.aliases, slot=alias_slot)
+    if selected is None or selected == plan.primary_query:
+        return (plan.primary_query,)
+    return (plan.primary_query, selected)
+
+
 async def scan_once(
     plan: SearchPlan,
     adapter: MarketplaceSearchAdapter,
@@ -63,7 +81,7 @@ async def scan_once(
     category_path = constraint.category_path if constraint is not None else None
     engine = match_engine or HybridMatchEngine()
 
-    queries = queries_for_cycle(plan, cycle)
+    queries = _queries_for_scan(plan, cycle, engine)
     raw_candidates: list[SearchCandidate] = []
     query_candidate_ids: dict[str, set[str]] = {}
     source_queries_by_identity: dict[
