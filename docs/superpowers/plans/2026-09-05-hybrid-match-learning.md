@@ -17,6 +17,7 @@
 - Search price is preview-only; alert prices require detail verification.
 - Explicit identity contradictions always reject regardless of learned score.
 - Search-only observations never update model weights.
+- Detail deterministic identity, not scorer probability, supplies automatic verified labels.
 - No heavy ML dependency in v1.
 
 ---
@@ -30,11 +31,11 @@
 **Interfaces:**
 - Produces: `MatchFeatureVector`, `HybridMatchDecision`, `OnlineMatchModel`, `HybridMatchEngine`.
 
-- [ ] Write failing tests for identifier/variant hard vetoes, high-confidence exact evidence, and ambiguous queueing.
-- [ ] Run CI and confirm failure is caused by missing learning module/behavior.
-- [ ] Implement deterministic feature extraction and hard vetoes.
-- [ ] Implement a conservative pure-Python online logistic scorer.
-- [ ] Run the full suite.
+- [x] Write failing tests for identifier/variant hard vetoes, high-confidence exact evidence, and ambiguous queueing.
+- [x] Run CI and confirm failure is caused by missing learning module/behavior.
+- [x] Implement deterministic feature extraction and hard vetoes.
+- [x] Implement a conservative pure-Python online logistic scorer.
+- [x] Run the full suite.
 
 ### Task 2: Verified-only learning, evidence, and active-learning queue
 
@@ -45,10 +46,11 @@
 **Interfaces:**
 - Produces: `LearningEvidence`, `LearningEvidenceSource`, `UncertainMatchQueue` and verified-only `learn()` methods.
 
-- [ ] Write failing tests proving search evidence cannot change weights.
-- [ ] Write failing tests proving verified positive/negative labels update weights and preserve provenance.
-- [ ] Implement the minimal evidence store and uncertainty queue.
-- [ ] Run the full suite.
+- [x] Write failing tests proving search evidence cannot change weights.
+- [x] Write failing tests proving verified positive/negative labels update weights and preserve provenance.
+- [x] Implement the minimal evidence store and uncertainty queue.
+- [x] Remove resolved candidates from the uncertainty queue after verified labeling.
+- [x] Run the full suite.
 
 ### Task 3: Hard-negative mining and query performance
 
@@ -57,12 +59,14 @@
 - Modify: `tests/test_match_learning.py`
 
 **Interfaces:**
-- Produces: `HardNegativeMiner`, `QueryPerformanceTracker`.
+- Produces: hard-negative buckets and `QueryPerformanceTracker`.
 
-- [ ] Write failing tests for sibling/variant/accessory negative buckets.
-- [ ] Write failing tests that supplemental query ranking prefers verified unique yield and penalizes verified rejects.
-- [ ] Implement mining and query metrics without automatically training on mined negatives.
-- [ ] Run the full suite.
+- [x] Write failing tests for sibling/variant/accessory negative buckets.
+- [x] Write failing tests that supplemental query ranking prefers verified unique yield and penalizes verified rejects.
+- [x] Implement mining and query metrics without automatically training on mined negatives.
+- [x] Deduplicate repeated hard negatives from recurring scans.
+- [x] Add cold-start exploration, learned exploitation, and periodic alias re-exploration.
+- [x] Run the full suite.
 
 ### Task 4: Scan integration
 
@@ -73,10 +77,11 @@
 **Interfaces:**
 - `scan_once(..., match_engine: HybridMatchEngine | None = None)`.
 
-- [ ] Write failing tests that taxonomy still runs first and hybrid ambiguity is queued.
-- [ ] Integrate the hybrid engine after taxonomy and before final accepted/ambiguous output.
-- [ ] Attribute query discovery results to the query-performance tracker.
-- [ ] Run the full suite.
+- [x] Write failing tests that taxonomy still runs first and hybrid ambiguity is queued.
+- [x] Integrate the hybrid engine after taxonomy and before final accepted/ambiguous output.
+- [x] Attribute query discovery results to the query-performance tracker.
+- [x] Use verified query performance to select the supplemental alias without changing primary cadence.
+- [x] Run the full suite.
 
 ### Task 5: Detail verification integration
 
@@ -88,12 +93,18 @@
 **Interfaces:**
 - `verify_candidate(..., match_engine: HybridMatchEngine | None = None)`.
 
-- [ ] Write failing tests that successful detail verification trains a positive and failed identity recheck records a verified negative.
-- [ ] Implement verified evidence recording without trusting search labels.
-- [ ] Run Ruff and full pytest suite.
+- [x] Write failing tests that successful detail verification trains a positive and failed identity recheck records a verified negative.
+- [x] Implement verified evidence recording without trusting search labels.
+- [x] Add regression coverage proving an uncalibrated scorer cannot create its own negative detail label.
+- [x] Preserve explicit brand/GTIN/EAN/UPC/MPN hints in SearchPlan while forbidding invented identifiers.
+- [x] Run Ruff and full pytest suite.
 
 ### Task 6: Final verification
 
-- [ ] Confirm branch is ahead of `main` only with intended feature changes.
-- [ ] Confirm latest GitHub Actions run is green for Ruff and pytest.
-- [ ] Keep the feature branch/PR open unless the user explicitly chooses integration.
+- [x] Confirm branch is ahead of `main` only with intended feature changes.
+- [x] Confirm GitHub Actions is green for Ruff and pytest after adaptive scan integration.
+- [x] Keep the feature branch/PR open unless the user explicitly chooses integration.
+
+## Remaining production step
+
+The learning engine is currently process-local. PostgreSQL persistence for verified evidence, model weights, query statistics, taxonomy observations, and unresolved active-learning items is intentionally deferred to the storage/runtime layer. Without that persistence, learned state resets when the worker process restarts.
