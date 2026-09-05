@@ -82,7 +82,7 @@ class FakeWorkerRepository:
     async def claim_due_products(self, *, worker_id, now, limit, lease_seconds):
         return (self.tracked,)
 
-    async def known_listings(self, product_id, marketplace):
+    async def list_known_candidates(self, product_id, marketplace):
         return (candidate("known"),)
 
     async def complete_scan(
