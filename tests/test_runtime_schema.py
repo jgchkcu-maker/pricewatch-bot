@@ -29,3 +29,13 @@ def test_runtime_schema_keeps_public_and_conditional_prices_separate() -> None:
 
     assert "public_price numeric" in sql
     assert "conditional_prices jsonb" in sql
+
+
+def test_quality_migration_adds_status_and_observation_table() -> None:
+    sql = Path("sql/002_offer_quality.sql").read_text(encoding="utf-8").lower()
+
+    assert "quality_status" in sql
+    assert "offer_quality_observation" in sql
+    assert "add column if not exists" in sql
+    assert "default 'legacy'" in sql
+    assert "tracked_product_id, marketplace, observed_at desc" in sql
