@@ -64,6 +64,9 @@ class OfferQualityDecision:
     confirmation_count: int = 0
 
 
+_DEFAULT_CONTEXT = OfferQualityContext()
+_DEFAULT_POLICY = OfferQualityPolicy()
+
 _ACCESSORY_TARGET_TERMS = frozenset(
     {
         "accessory",
@@ -276,8 +279,14 @@ def _price_reference(
     return reference, ratio, extreme_low
 
 
-def _has_trusted_seller(candidate: SearchCandidate, snapshot: OfferSnapshot, context: OfferQualityContext) -> bool:
-    seller_ids = {value for value in (candidate.seller_id, snapshot.locator.seller_id) if value}
+def _has_trusted_seller(
+    candidate: SearchCandidate,
+    snapshot: OfferSnapshot,
+    context: OfferQualityContext,
+) -> bool:
+    seller_ids = {
+        value for value in (candidate.seller_id, snapshot.locator.seller_id) if value
+    }
     return bool(seller_ids.intersection(context.trusted_seller_ids))
 
 
@@ -285,8 +294,8 @@ def evaluate_offer_quality(
     plan: SearchPlan,
     candidate: SearchCandidate,
     snapshot: OfferSnapshot,
-    context: OfferQualityContext = OfferQualityContext(),
-    policy: OfferQualityPolicy = OfferQualityPolicy(),
+    context: OfferQualityContext = _DEFAULT_CONTEXT,
+    policy: OfferQualityPolicy = _DEFAULT_POLICY,
 ) -> OfferQualityDecision:
     """Classify one identity-verified exact offer without external side effects."""
     if not candidate.listing_id.strip() or not snapshot.locator.listing_id.strip():
