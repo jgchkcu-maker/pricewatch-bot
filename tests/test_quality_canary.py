@@ -1,10 +1,18 @@
 # ruff: noqa: I001
 import asyncio
+import json
 from decimal import Decimal
+from pathlib import Path
 
 from pricewatch.marketplaces import OfferLocator, OfferSnapshot, SearchCandidate
 from pricewatch.quality_canary import run_marketplace_canary
 from pricewatch.search_plan import SearchPlan
+
+FIXTURE = Path(__file__).parent / "fixtures" / "offer_quality_canary_cases.json"
+
+
+def fixture() -> dict:
+    return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
 def plan() -> SearchPlan:
@@ -32,19 +40,11 @@ class FixtureAdapter:
     marketplace = "wildberries"
 
     def __init__(self) -> None:
-        self.candidates = [
-            candidate("1", "AirPods Pro 3"),
-            candidate("2", "AirPods Pro 3"),
-            candidate("3", "Чехол для AirPods Pro 3"),
-            candidate("4", "AirPods Pro 3 копия 1:1"),
-            candidate("5", "AirPods Pro 3"),
-        ]
+        data = fixture()
+        self.candidates = [candidate(item["listing_id"], item["title"]) for item in data["offers"]]
         self.snapshots = {
-            "1": ("19990", "AirPods Pro 3", True),
-            "2": ("827", "AirPods Pro 3", True),
-            "3": ("799", "Чехол для AirPods Pro 3", True),
-            "4": ("827", "AirPods Pro 3 копия 1:1", True),
-            "5": ("19990", "AirPods Pro 3", False),
+            item["listing_id"]: (item["price"], item["title"], item["available"])
+            for item in data["offers"]
         }
 
     async def search(self, query, *, limit=50, page=1, category_path=None):
@@ -67,12 +67,13 @@ class EmptyAdapter(FixtureAdapter):
 
 
 def test_fixture_canary_partitions_every_exact_verified_offer() -> None:
+    data = fixture()
     result = asyncio.run(
         run_marketplace_canary(
             plan(),
             FixtureAdapter(),
             limit=10,
-            trusted_prices=(Decimal("18990"), Decimal("19990"), Decimal("20990")),
+            trusted_prices=tuple(Decimal(value) for value in data["trusted_prices"]),
         )
     )
 
