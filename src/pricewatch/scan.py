@@ -12,6 +12,11 @@ from pricewatch.taxonomy import (
     TaxonomyRegistry,
     taxonomy_gate,
 )
+from pricewatch.transport import (
+    MarketplaceAccessError,
+    MarketplaceRateLimitedError,
+    MarketplaceTransportError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +58,27 @@ def _queries_for_scan(
     return (plan.primary_query, selected)
 
 
+def _apply_marketplace_query_budget(
+    queries: tuple[str, ...],
+    *,
+    cycle: int,
+    adapter: MarketplaceSearchAdapter,
+) -> tuple[str, ...]:
+    raw_budget = getattr(adapter, "max_search_queries_per_scan", None)
+    if raw_budget is None:
+        return queries
+    if isinstance(raw_budget, bool) or not isinstance(raw_budget, int) or raw_budget <= 0:
+        raise ValueError("max_search_queries_per_scan must be a positive integer")
+    if len(queries) <= raw_budget:
+        return queries
+    if raw_budget == 1:
+        # Scheduled alias cycles contain (primary, alias). Alternate naturally:
+        # even cycles keep the primary-only schedule, odd cycles exercise the
+        # learned alias without issuing a second burst request.
+        return (queries[cycle % len(queries)],)
+    return queries[:raw_budget]
+
+
 async def scan_once(
     plan: SearchPlan,
     adapter: MarketplaceSearchAdapter,
@@ -81,19 +107,38 @@ async def scan_once(
     category_path = constraint.category_path if constraint is not None else None
     engine = match_engine or HybridMatchEngine()
 
-    queries = _queries_for_scan(plan, cycle, engine)
+    scheduled_queries = _queries_for_scan(plan, cycle, engine)
+    queries = _apply_marketplace_query_budget(
+        scheduled_queries,
+        cycle=cycle,
+        adapter=adapter,
+    )
     raw_candidates: list[SearchCandidate] = []
+    completed_queries: list[str] = []
     query_candidate_ids: dict[str, set[str]] = {}
     source_queries_by_identity: dict[
         tuple[str, str, str | None, str | None], list[str]
     ] = {}
 
     for query in queries:
-        query_candidates = await adapter.search(
-            query,
-            limit=limit,
-            category_path=category_path,
-        )
+        try:
+            query_candidates = await adapter.search(
+                query,
+                limit=limit,
+                category_path=category_path,
+            )
+        except (
+            MarketplaceRateLimitedError,
+            MarketplaceAccessError,
+            MarketplaceTransportError,
+        ):
+            # Do not throw away a valid primary result just because an optional
+            # follow-up alias hit a transient marketplace access limit.
+            if raw_candidates:
+                break
+            raise
+
+        completed_queries.append(query)
         raw_candidates.extend(query_candidates)
         query_ids = query_candidate_ids.setdefault(query, set())
         for candidate in query_candidates:
@@ -103,6 +148,7 @@ async def scan_once(
             if query not in source_queries:
                 source_queries.append(query)
 
+    effective_queries = tuple(completed_queries)
     unique_candidates: list[SearchCandidate] = []
     seen: set[tuple[str, str, str | None, str | None]] = set()
     duplicate_count = 0
@@ -118,7 +164,9 @@ async def scan_once(
     ambiguous: list[SearchCandidate] = []
     rejected_count = 0
     taxonomy_rejected_count = 0
-    accepted_ids_by_query: dict[str, set[str]] = {query: set() for query in queries}
+    accepted_ids_by_query: dict[str, set[str]] = {
+        query: set() for query in effective_queries
+    }
 
     for candidate in unique_candidates:
         identity = candidate_identity(candidate)
@@ -149,7 +197,7 @@ async def scan_once(
         else:
             rejected_count += 1
 
-    for query in queries:
+    for query in effective_queries:
         engine.query_performance.record_discovery(
             query,
             candidate_ids=query_candidate_ids.get(query, set()),
@@ -158,7 +206,7 @@ async def scan_once(
 
     return ScanOutcome(
         marketplace=adapter.marketplace,
-        queries=queries,
+        queries=effective_queries,
         raw_count=len(raw_candidates),
         accepted=tuple(accepted),
         ambiguous=tuple(ambiguous),
