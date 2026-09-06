@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pricewatch.marketplaces import (
@@ -30,6 +30,51 @@ def _string(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _rating(value: object) -> Decimal | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        rating = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    return rating if Decimal("0") < rating <= Decimal("5") else None
+
+
+def _review_count(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        return int(value) if value >= 0 and value.is_integer() else None
+    if isinstance(value, str):
+        text = value.strip()
+        return int(text) if text.isdigit() else None
+    return None
+
+
+def _product_rating(
+    payload: dict[str, Any],
+    listing_id: str,
+) -> tuple[Decimal | None, int | None]:
+    """Read product-level review metadata for one exact WB card.
+
+    ``supplierRating`` is intentionally never consulted: it belongs to the
+    seller, while alerts must show the rating of the concrete product card.
+    """
+    products = payload.get("products")
+    if not isinstance(products, list):
+        return None, None
+    for product in products:
+        if not isinstance(product, dict) or _string(product.get("id")) != listing_id:
+            continue
+        rating = _rating(product.get("reviewRating"))
+        if rating is None:
+            rating = _rating(product.get("rating"))
+        return rating, _review_count(product.get("feedbacks"))
+    return None, None
 
 
 def _taxonomy(product: dict[str, Any]) -> MarketplaceTaxonomy | None:
@@ -152,6 +197,7 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
     if candidate.price is None:
         raise ParserDriftError("Wildberries verified card candidate has no product price")
 
+    rating, review_count = _product_rating(payload, candidate.listing_id)
     return OfferSnapshot(
         locator=locator,
         title=candidate.title,
@@ -160,6 +206,8 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
         attributes=candidate.attributes,
         original_price=candidate.original_price,
         price_source="card",
+        rating=rating,
+        review_count=review_count,
     )
 
 
