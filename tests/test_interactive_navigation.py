@@ -2,10 +2,18 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from pricewatch.bot import TelegramBotApp
-from pricewatch.runtime_models import SubscriptionRecord, TrackedProductRecord, UserProductSummary
+from pricewatch.runtime_models import (
+    SubscriptionRecord,
+    TrackedProductRecord,
+    UserProductSummary,
+)
 from pricewatch.search_plan import SearchPlan
 from pricewatch.telegram_api import TelegramClient
-from pricewatch.telegram_views import render_add_prompt, render_product_list, render_tracking_card
+from pricewatch.telegram_views import (
+    render_add_prompt,
+    render_product_list,
+    render_tracking_card,
+)
 
 NOW = datetime(2026, 9, 6, 7, 30, tzinfo=UTC)
 
@@ -15,7 +23,11 @@ def _summary() -> UserProductSummary:
         canonical_name="Apple AirPods Pro 3",
         primary_query="apple airpods pro 3",
         product_type="headphones",
-        identity_attributes={"brand": "Apple", "model": "AirPods Pro", "generation": "3"},
+        identity_attributes={
+            "brand": "Apple",
+            "model": "AirPods Pro",
+            "generation": "3",
+        },
     )
     product = TrackedProductRecord(
         id=42,
@@ -28,7 +40,12 @@ def _summary() -> UserProductSummary:
         next_scan_at=NOW,
         last_successful_scan_at=NOW,
     )
-    subscription = SubscriptionRecord(id=7, user_id=11, tracked_product_id=42, status="active")
+    subscription = SubscriptionRecord(
+        id=7,
+        user_id=11,
+        tracked_product_id=42,
+        status="active",
+    )
     return UserProductSummary(
         subscription=subscription,
         product=product,
@@ -110,9 +127,17 @@ def _callback_values(view):
     ]
 
 
+def _app(telegram: FakeTelegram) -> TelegramBotApp:
+    return TelegramBotApp(
+        repository=FakeRepository(),
+        plan_provider=FakeProvider(),
+        telegram=telegram,
+    )
+
+
 def test_callback_navigation_edits_existing_message_instead_of_sending_new_one() -> None:
     telegram = FakeTelegram()
-    app = TelegramBotApp(repository=FakeRepository(), plan_provider=FakeProvider(), telegram=telegram)
+    app = _app(telegram)
 
     asyncio.run(app.handle_update(_callback("my", message_id=55)))
 
@@ -123,7 +148,7 @@ def test_callback_navigation_edits_existing_message_instead_of_sending_new_one()
 
 def test_history_shows_timestamped_prices_sorted_from_min_to_max() -> None:
     telegram = FakeTelegram()
-    app = TelegramBotApp(repository=FakeRepository(), plan_provider=FakeProvider(), telegram=telegram)
+    app = _app(telegram)
 
     asyncio.run(app.handle_update(_callback("history:7")))
 
