@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from pricewatch.search_plan import SearchPlan
+from pricewatch.search_plan import SearchPlan, normalize_query
 
 DEFAULT_SEARCH_PLAN_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -47,7 +47,11 @@ Rules:
    identifier was not supplied or cannot be known with very high certainty from the product name,
    omit it instead of guessing.
 10. Do not put used/refurbished/accessory variants into aliases for a new main product.
-11. Output JSON only. No markdown, explanation, comments, or extra keys.
+11. Identity-critical edition/modifier words must never be silently dropped. Preserve modifiers
+   such as Pro, Max, Ultra, Plus, Mini, SE, FE and their obvious user-language/transliterated forms
+   (for example Russian про, макс, ультра, плюс, мини) in canonical_name and primary_query when
+   they are explicitly present in the user's request. Word order may differ; identity may not.
+12. Output JSON only. No markdown, explanation, comments, or extra keys.
 
 Required JSON object:
 {
@@ -81,6 +85,15 @@ _EXACT_IDENTIFIER_KEYS = frozenset(
         "manufacturer part number",
     }
 )
+_CRITICAL_MODIFIERS: dict[str, frozenset[str]] = {
+    "pro": frozenset({"pro", "про"}),
+    "max": frozenset({"max", "макс"}),
+    "ultra": frozenset({"ultra", "ультра"}),
+    "plus": frozenset({"plus", "плюс"}),
+    "mini": frozenset({"mini", "мини"}),
+    "se": frozenset({"se"}),
+    "fe": frozenset({"fe"}),
+}
 
 
 class SearchPlanPayloadError(ValueError):
@@ -119,6 +132,31 @@ def _validate_exact_identifier_provenance(plan: SearchPlan, user_text: str) -> N
             raise SearchPlanPayloadError(
                 f"exact identifier {key} was not present in the user input"
             )
+
+
+def _critical_modifiers_from_input(user_text: str) -> tuple[str, ...]:
+    tokens = set(normalize_query(user_text).split())
+    return tuple(
+        canonical
+        for canonical, aliases in _CRITICAL_MODIFIERS.items()
+        if tokens.intersection(aliases)
+    )
+
+
+def _contains_modifier(text: str, canonical: str) -> bool:
+    aliases = _CRITICAL_MODIFIERS[canonical]
+    return bool(set(normalize_query(text).split()).intersection(aliases))
+
+
+def _missing_critical_modifiers(plan: SearchPlan, user_text: str) -> tuple[str, ...]:
+    missing: list[str] = []
+    for canonical in _critical_modifiers_from_input(user_text):
+        if not _contains_modifier(plan.canonical_name, canonical):
+            missing.append(canonical)
+            continue
+        if not _contains_modifier(plan.primary_query, canonical):
+            missing.append(canonical)
+    return tuple(missing)
 
 
 def parse_search_plan_response(raw_text: str) -> SearchPlan:
@@ -207,11 +245,7 @@ class GeminiSearchPlanProvider:
         if self._owns_client:
             await self._client.aclose()
 
-    async def create_plan(self, user_text: str) -> SearchPlan:
-        query = user_text.strip()
-        if not query:
-            raise ValueError("user_text must not be empty")
-
+    async def _generate_plan(self, prompt_text: str) -> SearchPlan:
         url = f"{self._base_url}/models/{self._model}:generateContent"
         payload = {
             "systemInstruction": {
@@ -220,7 +254,7 @@ class GeminiSearchPlanProvider:
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": query}],
+                    "parts": [{"text": prompt_text}],
                 }
             ],
             "generationConfig": {
@@ -269,7 +303,34 @@ class GeminiSearchPlanProvider:
         ]
         if not text_parts:
             raise RuntimeError("Gemini SearchPlan candidate contained no text")
-        raw_text = "".join(text_parts)
-        plan = parse_search_plan_response(raw_text)
+        return parse_search_plan_response("".join(text_parts))
+
+    async def create_plan(self, user_text: str) -> SearchPlan:
+        query = user_text.strip()
+        if not query:
+            raise ValueError("user_text must not be empty")
+
+        plan = await self._generate_plan(query)
         _validate_exact_identifier_provenance(plan, query)
-        return plan
+        missing = _missing_critical_modifiers(plan, query)
+        if not missing:
+            return plan
+
+        modifiers = ", ".join(missing)
+        correction = (
+            f"Original product request: {query}\n"
+            f"Your previous SearchPlan incorrectly dropped these identity-critical modifiers: "
+            f"{modifiers}.\n"
+            "Regenerate the SearchPlan from the original request. Preserve each listed modifier "
+            "in canonical_name and primary_query and, when natural, in model/edition identity "
+            "attributes. Do not invent any other specification. Output JSON only."
+        )
+        corrected = await self._generate_plan(correction)
+        _validate_exact_identifier_provenance(corrected, query)
+        still_missing = _missing_critical_modifiers(corrected, query)
+        if still_missing:
+            raise SearchPlanPayloadError(
+                "critical product modifiers were dropped after correction: "
+                + ", ".join(still_missing)
+            )
+        return corrected
