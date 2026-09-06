@@ -130,6 +130,7 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
         )
     rows.append([{"text": "📊 История", "callback_data": f"history:{subscription.id}"}])
     rows.append([action])
+    rows.append([{"text": "🗑 Удалить", "callback_data": f"delete:{subscription.id}"}])
     rows.append([{"text": "⬅️ Назад", "callback_data": "my"}])
 
     state = (
@@ -145,6 +146,26 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
             "Проверка: примерно каждые 4 минуты"
         ),
         reply_markup={"inline_keyboard": rows},
+    )
+
+
+def render_delete_confirmation(summary: UserProductSummary) -> TelegramView:
+    subscription_id = summary.subscription.id
+    return TelegramView(
+        text=(
+            "🗑 Удалить товар?\n\n"
+            f"Удалить {summary.product.canonical_name} из отслеживания?\n\n"
+            "Если этот товар больше никто не отслеживает, его история цен тоже будет удалена."
+        ),
+        reply_markup=_inline_keyboard(
+            [
+                {
+                    "text": "🗑 Да, удалить",
+                    "callback_data": f"delete_confirm:{subscription_id}",
+                }
+            ],
+            [{"text": "⬅️ Назад", "callback_data": f"product:{subscription_id}"}],
+        ),
     )
 
 
