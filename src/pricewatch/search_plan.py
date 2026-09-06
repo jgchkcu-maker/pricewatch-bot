@@ -47,6 +47,7 @@ class SearchPlan:
     required_tokens: tuple[str, ...] = ()
     excluded_terms: tuple[str, ...] = ()
     identity_attributes: Mapping[str, str] = field(default_factory=dict)
+    condition: str = "new"
 
     def __post_init__(self) -> None:
         canonical_name = self.canonical_name.strip()
@@ -62,6 +63,9 @@ class SearchPlan:
         required_tokens = _normalized_tuple(self.required_tokens)
         excluded_terms = _normalized_tuple(self.excluded_terms)
         identity_attributes = _identity_attributes(self.identity_attributes)
+        condition = normalize_query(self.condition)
+        if condition not in {"new", "used", "refurbished", "any"}:
+            raise ValueError("condition must be one of: new, used, refurbished, any")
 
         object.__setattr__(self, "canonical_name", canonical_name)
         object.__setattr__(self, "primary_query", primary)
@@ -70,6 +74,7 @@ class SearchPlan:
         object.__setattr__(self, "required_tokens", required_tokens)
         object.__setattr__(self, "excluded_terms", excluded_terms)
         object.__setattr__(self, "identity_attributes", identity_attributes)
+        object.__setattr__(self, "condition", condition)
 
 
 def queries_for_cycle(

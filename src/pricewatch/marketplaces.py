@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -15,6 +16,24 @@ class ParserDriftError(ValueError):
 
 class OfferIdentityError(ValueError):
     """A detail response could not verify the exact requested offer/variation."""
+
+
+class OfferCondition(StrEnum):
+    NEW = "new"
+    USED = "used"
+    REFURBISHED = "refurbished"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class OfferQualitySignals:
+    seller_name: str | None = None
+    seller_rating: Decimal | None = None
+    seller_review_count: int | None = None
+    condition: OfferCondition = OfferCondition.UNKNOWN
+    authenticity_badges: tuple[str, ...] = ()
+    identifiers: Mapping[str, str] = field(default_factory=dict)
+    image_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +62,8 @@ class SearchCandidate:
     original_price: Decimal | None = None
     available: bool | None = None
     price_source: str | None = None
+    quality_status: str | None = None
+    quality_observation_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +87,7 @@ class OfferSnapshot:
     price_source: str = "offer"
     rating: Decimal | None = None
     review_count: int | None = None
+    quality_signals: OfferQualitySignals = field(default_factory=OfferQualitySignals)
 
 
 class MarketplaceSearchAdapter(Protocol):

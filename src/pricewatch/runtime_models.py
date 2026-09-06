@@ -23,6 +23,7 @@ def search_plan_to_payload(plan: SearchPlan) -> dict[str, Any]:
         "required_tokens": list(plan.required_tokens),
         "excluded_terms": list(plan.excluded_terms),
         "identity_attributes": dict(plan.identity_attributes),
+        "condition": plan.condition,
     }
 
 
@@ -40,6 +41,7 @@ def search_plan_from_payload(payload: Mapping[str, Any]) -> SearchPlan:
         required_tokens=tuple(str(value) for value in payload.get("required_tokens", [])),
         excluded_terms=tuple(str(value) for value in payload.get("excluded_terms", [])),
         identity_attributes={str(key): str(value) for key, value in identity.items()},
+        condition=str(payload.get("condition", "new")),
     )
 
 

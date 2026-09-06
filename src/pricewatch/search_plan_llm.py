@@ -51,13 +51,16 @@ Rules:
    such as Pro, Max, Ultra, Plus, Mini, SE, FE and their obvious user-language/transliterated forms
    (for example Russian про, макс, ультра, плюс, мини) in canonical_name and primary_query when
    they are explicitly present in the user's request. Word order may differ; identity may not.
-12. Output JSON only. No markdown, explanation, comments, or extra keys.
+12. Set condition to exactly one of "new", "used", "refurbished", or "any". Use "new" unless
+   the user explicitly asks for used/refurbished goods or explicitly accepts any condition.
+13. Output JSON only. No markdown, explanation, comments, or extra keys.
 
 Required JSON object:
 {
   "canonical_name": "string",
   "product_type": "short generic type or null",
   "primary_query": "string",
+  "condition": "new | used | refurbished | any",
   "aliases": ["string", "... at most 7 aliases"],
   "required_tokens": ["string"],
   "excluded_terms": ["string"],
@@ -69,6 +72,7 @@ _ALLOWED_KEYS = {
     "canonical_name",
     "product_type",
     "primary_query",
+    "condition",
     "aliases",
     "required_tokens",
     "excluded_terms",
@@ -94,6 +98,7 @@ _CRITICAL_MODIFIERS: dict[str, frozenset[str]] = {
     "se": frozenset({"se"}),
     "fe": frozenset({"fe"}),
 }
+_VALID_CONDITIONS = frozenset({"new", "used", "refurbished", "any"})
 
 
 class SearchPlanPayloadError(ValueError):
@@ -178,6 +183,9 @@ def parse_search_plan_response(raw_text: str) -> SearchPlan:
 
     canonical_name = _require_string(payload["canonical_name"], "canonical_name")
     primary_query = _require_string(payload["primary_query"], "primary_query")
+    condition = _require_string(payload["condition"], "condition").casefold()
+    if condition not in _VALID_CONDITIONS:
+        raise SearchPlanPayloadError("condition must be one of: new, used, refurbished, any")
 
     product_type_raw = payload["product_type"]
     if product_type_raw is None:
@@ -210,6 +218,7 @@ def parse_search_plan_response(raw_text: str) -> SearchPlan:
             required_tokens=required_tokens,
             excluded_terms=excluded_terms,
             identity_attributes=identity_attributes,
+            condition=condition,
         )
     except ValueError as exc:
         raise SearchPlanPayloadError(str(exc)) from exc
