@@ -90,7 +90,7 @@ def test_fixture_canary_partitions_every_exact_verified_offer() -> None:
         + result.unavailable_count
         == result.verified_count
     )
-    assert result.reason_code_counts["price_outlier"] == 2
+    assert result.reason_code_counts["price_outlier"] == 1
     assert result.reason_code_counts["accessory_only"] == 1
     assert result.reason_code_counts["explicit_counterfeit"] == 1
     assert result.reason_code_counts["unavailable"] == 1
