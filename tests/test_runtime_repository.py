@@ -1,6 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from pricewatch.runtime_models import identity_fingerprint
 from pricewatch.runtime_repository import RuntimeRepository
@@ -115,3 +117,74 @@ def test_repository_uses_conflict_safe_global_product_and_subscription_upserts()
     assert "on conflict (identity_fingerprint) do update" in sql
     assert "on conflict (user_id, tracked_product_id) do update" in sql
     assert "subscriber_count = (" in sql
+
+
+class DeletionConnection(FakeConnection):
+    def __init__(self, *, owned: bool = True, has_remaining_subscriptions: bool = False) -> None:
+        super().__init__()
+        self.owned = owned
+        self.has_remaining_subscriptions = has_remaining_subscriptions
+
+    async def execute(self, query: str, params=None):
+        self.calls.append((query, params))
+        normalized = " ".join(query.lower().split())
+        if "delete from subscription" in normalized and "returning tracked_product_id" in normalized:
+            return FakeCursor((42,) if self.owned else None)
+        if "select exists" in normalized and "from subscription" in normalized:
+            return FakeCursor((self.has_remaining_subscriptions,))
+        return FakeCursor()
+
+
+def test_delete_subscription_is_scoped_to_owner() -> None:
+    connection = DeletionConnection(owned=False)
+    repository = RuntimeRepository(FakeFactory(connection))
+
+    with pytest.raises(KeyError):
+        asyncio.run(repository.delete_subscription(user_id=99, subscription_id=77))
+
+    delete_query, params = next(
+        (query, params)
+        for query, params in connection.calls
+        if "delete from subscription" in query.lower()
+    )
+    normalized = " ".join(delete_query.lower().split())
+    assert "where id = %s and user_id = %s" in normalized
+    assert params == (77, 99)
+
+
+def test_delete_last_subscription_removes_product_price_history() -> None:
+    connection = DeletionConnection(owned=True, has_remaining_subscriptions=False)
+    repository = RuntimeRepository(FakeFactory(connection))
+
+    asyncio.run(repository.delete_subscription(user_id=11, subscription_id=77))
+
+    sql = "\n".join(query for query, _ in connection.calls).lower()
+    assert "delete from price_event where tracked_product_id = %s" in " ".join(sql.split())
+    assert "subscriber_count = (" in sql
+    assert connection.commits == 1
+
+
+def test_delete_subscription_keeps_history_when_someone_else_still_tracks_product() -> None:
+    connection = DeletionConnection(owned=True, has_remaining_subscriptions=True)
+    repository = RuntimeRepository(FakeFactory(connection))
+
+    asyncio.run(repository.delete_subscription(user_id=11, subscription_id=77))
+
+    sql = "\n".join(query for query, _ in connection.calls).lower()
+    assert "delete from price_event where tracked_product_id = %s" not in " ".join(sql.split())
+
+
+def test_price_history_retention_keeps_one_day_buffer_after_seven_day_window() -> None:
+    now = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
+    connection = FakeConnection()
+    repository = RuntimeRepository(FakeFactory(connection))
+
+    asyncio.run(repository.prune_price_events(now=now))
+
+    prune_query, params = next(
+        (query, params)
+        for query, params in connection.calls
+        if "delete from price_event where verified_at" in " ".join(query.lower().split())
+    )
+    assert "verified_at < %s" in " ".join(prune_query.lower().split())
+    assert params == (now - timedelta(days=8),)
