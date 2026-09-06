@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -21,6 +22,33 @@ class TelegramRateLimitError(TelegramApiError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class _SecretRedactionFilter(logging.Filter):
+    def __init__(self, secret: str) -> None:
+        super().__init__()
+        self.secret = secret
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rendered = record.getMessage()
+        except Exception:
+            return True
+        if self.secret in rendered:
+            record.msg = rendered.replace(self.secret, "[REDACTED]")
+            record.args = ()
+        return True
+
+
+def _install_secret_redaction(secret: str) -> None:
+    for logger_name in ("httpx", "httpcore"):
+        logger = logging.getLogger(logger_name)
+        if any(
+            isinstance(item, _SecretRedactionFilter) and item.secret == secret
+            for item in logger.filters
+        ):
+            continue
+        logger.addFilter(_SecretRedactionFilter(secret))
+
+
 class TelegramClient:
     def __init__(
         self,
@@ -32,6 +60,7 @@ class TelegramClient:
         normalized = token.strip()
         if not normalized:
             raise ValueError("token must not be empty")
+        _install_secret_redaction(normalized)
         self._token = normalized
         self._base_url = base_url.rstrip("/")
         self._client = client or httpx.AsyncClient(timeout=35.0)
