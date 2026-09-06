@@ -18,6 +18,7 @@ from pricewatch.telegram_views import (
     render_cancelled,
     render_confirmation,
     render_correction_prompt,
+    render_delete_confirmation,
     render_plan_error,
     render_price_history,
     render_product_list,
@@ -85,6 +86,8 @@ class BotRepository(Protocol):
     async def pause_subscription(self, subscription_id: int) -> None: ...
 
     async def resume_subscription(self, subscription_id: int) -> None: ...
+
+    async def delete_subscription(self, *, user_id: int, subscription_id: int) -> None: ...
 
     async def recent_public_prices(
         self,
@@ -286,7 +289,14 @@ class TelegramBotApp:
                 message_id=message_id,
             )
             return
-        if action in {"pause", "resume", "product", "history"}:
+        if action in {
+            "pause",
+            "resume",
+            "product",
+            "history",
+            "delete",
+            "delete_confirm",
+        }:
             try:
                 subscription_id = int(raw_id)
             except ValueError:
@@ -395,6 +405,28 @@ class TelegramBotApp:
             await self._repository.pause_subscription(subscription_id)
         elif action == "resume":
             await self._repository.resume_subscription(subscription_id)
+        elif action == "delete":
+            await self._show(
+                chat_id,
+                render_delete_confirmation(current),
+                message_id=message_id,
+            )
+            return
+        elif action == "delete_confirm":
+            try:
+                await self._repository.delete_subscription(
+                    user_id=user_id,
+                    subscription_id=subscription_id,
+                )
+            except KeyError:
+                pass
+            refreshed = await self._repository.list_user_products(user_id)
+            await self._show(
+                chat_id,
+                render_product_list(refreshed),
+                message_id=message_id,
+            )
+            return
         elif action == "history":
             loader = getattr(self._repository, "recent_public_prices", None)
             if loader is None:
