@@ -29,6 +29,7 @@ def test_prompt_is_strict_about_universal_identity_and_query_spam() -> None:
     assert "7 aliases" in prompt
     assert "pro" in prompt
     assert "max" in prompt
+    assert "condition" in prompt
     assert DEFAULT_SEARCH_PLAN_MODEL == "gemini-3.5-flash-lite"
 
 
@@ -38,6 +39,7 @@ def test_parse_search_plan_response_builds_normalized_plan() -> None:
             "canonical_name": "Xiaomi Pad 7 8/256",
             "product_type": "tablet",
             "primary_query": "Xiaomi Pad 7 8/256",
+            "condition": "new",
             "aliases": [
                 "Xiaomi Pad7 8 256",
                 "Сяоми Пад 7 8 256",
@@ -59,6 +61,7 @@ def test_parse_search_plan_response_builds_normalized_plan() -> None:
     assert plan.primary_query == "xiaomi pad 7 8 256"
     assert plan.aliases == ("xiaomi pad7 8 256", "сяоми пад 7 8 256")
     assert plan.identity_attributes["ram"] == "8 gb"
+    assert plan.condition == "new"
 
 
 def test_parse_search_plan_response_rejects_invented_shape_and_alias_spam() -> None:
@@ -69,6 +72,7 @@ def test_parse_search_plan_response_rejects_invented_shape_and_alias_spam() -> N
         "canonical_name": "x",
         "product_type": "other",
         "primary_query": "x",
+        "condition": "new",
         "aliases": [f"x alias {index}" for index in range(8)],
         "required_tokens": [],
         "excluded_terms": [],
@@ -86,6 +90,7 @@ def test_parse_search_plan_response_requires_primary_and_canonical_name() -> Non
                     "canonical_name": "",
                     "product_type": "tablet",
                     "primary_query": "x",
+                    "condition": "new",
                     "aliases": [],
                     "required_tokens": [],
                     "excluded_terms": [],
@@ -102,6 +107,7 @@ def test_provider_retries_when_russian_pro_modifier_is_dropped() -> None:
             "canonical_name": "Apple AirPods 3",
             "product_type": "wireless headphones",
             "primary_query": "Apple AirPods 3",
+            "condition": "new",
             "aliases": ["AirPods 3"],
             "required_tokens": ["AirPods", "3"],
             "excluded_terms": ["case", "чехол"],
@@ -115,6 +121,7 @@ def test_provider_retries_when_russian_pro_modifier_is_dropped() -> None:
             "canonical_name": "Apple AirPods Pro 3",
             "product_type": "wireless headphones",
             "primary_query": "Apple AirPods Pro 3",
+            "condition": "new",
             "aliases": ["AirPods Pro 3", "Аирподс Про 3"],
             "required_tokens": ["AirPods", "Pro", "3"],
             "excluded_terms": ["AirPods 3", "AirPods Max", "case", "чехол"],
@@ -158,6 +165,7 @@ def test_provider_does_not_retry_when_critical_modifier_is_preserved() -> None:
         "canonical_name": "Samsung Galaxy S25 Ultra",
         "product_type": "smartphone",
         "primary_query": "Samsung Galaxy S25 Ultra",
+        "condition": "new",
         "aliases": [],
         "required_tokens": ["Samsung", "S25", "Ultra"],
         "excluded_terms": ["S25", "S25 Plus", "case"],
