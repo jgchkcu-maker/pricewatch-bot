@@ -132,7 +132,11 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
     rows.append([action])
     rows.append([{"text": "⬅️ Назад", "callback_data": "my"}])
 
-    state = "⏸ Отслеживание приостановлено" if subscription.status == "paused" else "✅ Отслеживание включено"
+    state = (
+        "⏸ Отслеживание приостановлено"
+        if subscription.status == "paused"
+        else "✅ Отслеживание включено"
+    )
     return TelegramView(
         text=(
             f"{state}\n\n"
