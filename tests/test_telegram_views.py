@@ -126,7 +126,7 @@ def test_new_low_alert_uses_exact_verified_url_and_public_price() -> None:
     assert buy["url"] == "https://www.ozon.ru/product/123/"
 
 
-def test_new_low_alert_shows_exact_product_rating_and_reviews_button() -> None:
+def test_new_low_alert_keeps_product_rating_only_in_reviews_button() -> None:
     payload = new_low_payload()
     payload.update(
         {
@@ -138,7 +138,7 @@ def test_new_low_alert_shows_exact_product_rating_and_reviews_button() -> None:
 
     view = render_new_low(payload)
 
-    assert "⭐ 4.8 · 12 436 отзывов" in view.text
+    assert "⭐ 4.8 · 12 436 отзывов" not in view.text
     rows = view.reply_markup["inline_keyboard"]
     assert rows[0][0] == {
         "text": "🛒 Открыть товар",
