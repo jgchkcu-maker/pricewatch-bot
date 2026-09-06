@@ -53,6 +53,32 @@ def test_parse_ozon_offer_uses_public_price_and_keeps_card_price_conditional() -
     assert "256 ГБ" in snapshot.attributes.values()
 
 
+def test_ozon_offer_reads_product_rating_widget() -> None:
+    payload = fixture("ozon_detail_minimal.json")
+    payload["widgetStates"]["webReviewProductScore-999-default-1"] = json.dumps(
+        {"totalScore": 4.9, "reviewsCount": 731}
+    )
+
+    snapshot = parse_offer_payload(payload, locator())
+
+    assert snapshot.rating == Decimal("4.9")
+    assert snapshot.review_count == 731
+
+
+def test_ozon_missing_or_malformed_rating_metadata_does_not_block_price() -> None:
+    missing = parse_offer_payload(fixture("ozon_detail_minimal.json"), locator())
+    assert missing.rating is None
+    assert missing.review_count is None
+    assert missing.price == Decimal("30990")
+
+    payload = fixture("ozon_detail_minimal.json")
+    payload["widgetStates"]["webReviewProductScore-999-default-1"] = "not-json"
+    malformed = parse_offer_payload(payload, locator())
+    assert malformed.rating is None
+    assert malformed.review_count is None
+    assert malformed.price == Decimal("30990")
+
+
 def test_ozon_offer_rejects_sku_mismatch() -> None:
     payload = fixture("ozon_detail_minimal.json")
     payload["widgetStates"]["webGallery-100-default-1"] = json.dumps({"sku": "999999999"})
