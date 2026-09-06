@@ -52,6 +52,36 @@ def _taxonomy_payload(candidate: SearchCandidate) -> dict[str, str | None] | Non
     }
 
 
+def _reviews_url(marketplace: str, listing_id: str) -> str | None:
+    """Build a review destination only for a verified, numeric marketplace id."""
+    normalized_id = listing_id.strip()
+    if not normalized_id.isdigit():
+        return None
+    normalized_marketplace = marketplace.casefold()
+    if normalized_marketplace == "ozon":
+        return f"https://www.ozon.ru/product/{normalized_id}/reviews/"
+    if normalized_marketplace == "wildberries":
+        return f"https://www.wildberries.ru/catalog/{normalized_id}/feedbacks"
+    return None
+
+
+def _rating_alert_payload(snapshot: OfferSnapshot) -> dict[str, Any]:
+    rating = snapshot.rating
+    review_count = snapshot.review_count
+    if rating is None or review_count is None or isinstance(review_count, bool):
+        return {}
+    if not (Decimal("0") < rating <= Decimal("5")) or review_count <= 0:
+        return {}
+    reviews_url = _reviews_url(snapshot.locator.marketplace, snapshot.locator.listing_id)
+    if reviews_url is None:
+        return {}
+    return {
+        "rating": str(rating),
+        "review_count": review_count,
+        "reviews_url": reviews_url,
+    }
+
+
 class VerifiedOfferStore:
     """Atomically persist trusted detail state, price events and buyer alerts."""
 
@@ -246,6 +276,7 @@ class VerifiedOfferStore:
 
             outbox_count = 0
             if allow_alerts and decision.is_new_low:
+                rating_payload = _rating_alert_payload(snapshot)
                 subscribers_cursor = await connection.execute(
                     """
                     SELECT u.id, u.chat_id, s.id
@@ -270,6 +301,7 @@ class VerifiedOfferStore:
                         "url": url,
                         "verified_at": verified_at.isoformat(),
                         "conditional_prices": conditional,
+                        **rating_payload,
                     }
                     serialized_payload = json.dumps(
                         payload,
