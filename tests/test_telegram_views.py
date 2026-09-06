@@ -62,6 +62,20 @@ def summary(
     )
 
 
+def new_low_payload() -> dict[str, object]:
+    return {
+        "product_name": "Xiaomi Pad 7 8/256",
+        "marketplace": "ozon",
+        "public_price": "24990",
+        "previous_min": "29490",
+        "delta": "4500",
+        "delta_percent": "15.26",
+        "url": "https://www.ozon.ru/product/123/",
+        "verified_at": NOW.isoformat(),
+        "conditional_prices": {"ozon_card": "23990"},
+    }
+
+
 def test_buyer_views_hide_internal_jargon_and_render_confirmation_attributes() -> None:
     start = render_start()
     confirmation = render_confirmation(plan(), confirmation_id="abc")
@@ -102,19 +116,7 @@ def test_tracking_card_has_pre_scan_state_and_rolling_minimum() -> None:
 
 
 def test_new_low_alert_uses_exact_verified_url_and_public_price() -> None:
-    view = render_new_low(
-        {
-            "product_name": "Xiaomi Pad 7 8/256",
-            "marketplace": "ozon",
-            "public_price": "24990",
-            "previous_min": "29490",
-            "delta": "4500",
-            "delta_percent": "15.26",
-            "url": "https://www.ozon.ru/product/123/",
-            "verified_at": NOW.isoformat(),
-            "conditional_prices": {"ozon_card": "23990"},
-        }
-    )
+    view = render_new_low(new_low_payload())
 
     assert "🔥 НОВАЯ МИНИМАЛЬНАЯ ЦЕНА" in view.text
     assert "24 990 ₽" in view.text
@@ -122,6 +124,48 @@ def test_new_low_alert_uses_exact_verified_url_and_public_price() -> None:
     assert "23 990 ₽" in view.text
     buy = view.reply_markup["inline_keyboard"][0][0]
     assert buy["url"] == "https://www.ozon.ru/product/123/"
+
+
+def test_new_low_alert_shows_exact_product_rating_and_reviews_button() -> None:
+    payload = new_low_payload()
+    payload.update(
+        {
+            "rating": "4.8",
+            "review_count": 12436,
+            "reviews_url": "https://www.ozon.ru/product/123/reviews/",
+        }
+    )
+
+    view = render_new_low(payload)
+
+    assert "⭐ 4.8 · 12 436 отзывов" in view.text
+    rows = view.reply_markup["inline_keyboard"]
+    assert rows[0][0] == {
+        "text": "🛒 Открыть товар",
+        "url": "https://www.ozon.ru/product/123/",
+    }
+    assert rows[1][0] == {
+        "text": "⭐ 4.8 · 12 436 отзывов",
+        "url": "https://www.ozon.ru/product/123/reviews/",
+    }
+
+
+def test_new_low_alert_omits_invalid_or_missing_rating_without_failing() -> None:
+    plain = render_new_low(new_low_payload())
+    assert "⭐" not in plain.text
+    assert len(plain.reply_markup["inline_keyboard"]) == 1
+
+    malformed_payload = new_low_payload()
+    malformed_payload.update(
+        {
+            "rating": "not-a-rating",
+            "review_count": "many",
+            "reviews_url": "https://www.ozon.ru/product/123/reviews/",
+        }
+    )
+    malformed = render_new_low(malformed_payload)
+    assert "⭐" not in malformed.text
+    assert len(malformed.reply_markup["inline_keyboard"]) == 1
 
 
 def test_product_list_is_compact_numbers_items_and_paginates() -> None:
