@@ -16,6 +16,16 @@ from pricewatch.taxonomy import MarketplaceTaxonomy
 
 _WB_SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v9/search"
 _WB_CARD_URL = "https://card.wb.ru/cards/v4/detail"
+_WB_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.wildberries.ru/",
+}
 
 
 def _kopecks_to_rubles(value: object) -> Decimal | None:
@@ -213,6 +223,10 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
 
 class WildberriesSearchAdapter:
     marketplace = "wildberries"
+    # WB starts returning 429 when the search host sees back-to-back catalog
+    # requests from the same cloud egress. Keep one rotating discovery query
+    # per scan; known listing detail polling remains independent and frequent.
+    max_search_queries_per_scan = 1
 
     def __init__(self, fetcher: JsonFetcher, *, dest: str = "-1257786") -> None:
         self._fetcher = fetcher
@@ -245,6 +259,7 @@ class WildberriesSearchAdapter:
                 "page": str(page),
                 "spp": "30",
             },
+            headers=_WB_HEADERS,
         )
         payload = await self._fetcher.get_json(request)
         return parse_search_payload(payload)[:limit]
@@ -263,6 +278,7 @@ class WildberriesSearchAdapter:
                 "spp": "30",
                 "nm": locator.listing_id,
             },
+            headers=_WB_HEADERS,
         )
         payload = await self._fetcher.get_json(request)
         return parse_offer_payload(payload, locator)
