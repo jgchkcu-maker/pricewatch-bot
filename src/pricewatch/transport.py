@@ -50,6 +50,7 @@ class HttpJsonFetcher:
             response = await self._client.get(
                 request.url,
                 params=request.params,
+                headers=request.headers,
                 follow_redirects=False,
             )
         except httpx.TimeoutException as exc:
