@@ -128,7 +128,10 @@ class DeletionConnection(FakeConnection):
     async def execute(self, query: str, params=None):
         self.calls.append((query, params))
         normalized = " ".join(query.lower().split())
-        if "delete from subscription" in normalized and "returning tracked_product_id" in normalized:
+        if (
+            "delete from subscription" in normalized
+            and "returning tracked_product_id" in normalized
+        ):
             return FakeCursor((42,) if self.owned else None)
         if "select exists" in normalized and "from subscription" in normalized:
             return FakeCursor((self.has_remaining_subscriptions,))
