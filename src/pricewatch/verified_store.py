@@ -9,6 +9,7 @@ from typing import Any
 
 from pricewatch.deals import DealDecision, evaluate_verified_price
 from pricewatch.marketplaces import OfferSnapshot, SearchCandidate
+from pricewatch.offer_quality import OfferQualityDecision, OfferQualityStatus
 from pricewatch.prices import PriceEvent
 from pricewatch.runtime_models import TrackedProductRecord
 from pricewatch.runtime_repository import ConnectionFactory
@@ -20,6 +21,12 @@ class VerifiedOfferWriteResult:
     event_id: int | None
     decision: DealDecision | None
     outbox_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class OfferQualityWriteResult:
+    marketplace_listing_id: int
+    status: str
 
 
 def _decimal_map_payload(values: Mapping[str, Decimal]) -> dict[str, str]:
@@ -82,11 +89,186 @@ def _rating_alert_payload(snapshot: OfferSnapshot) -> dict[str, Any]:
     }
 
 
+def _quality_signal_payload(snapshot: OfferSnapshot) -> dict[str, Any]:
+    signals = snapshot.quality_signals
+    return {
+        "seller_name": signals.seller_name,
+        "seller_rating": str(signals.seller_rating) if signals.seller_rating is not None else None,
+        "seller_review_count": signals.seller_review_count,
+        "condition": signals.condition.value,
+        "authenticity_badges": list(signals.authenticity_badges),
+        "identifiers": {str(key): str(value) for key, value in signals.identifiers.items()},
+        "image_count": signals.image_count,
+    }
+
+
+def _reason_codes_json(decision: OfferQualityDecision) -> str:
+    return json.dumps([reason.value for reason in decision.reason_codes], sort_keys=True)
+
+
+def _validate_exact_pair(candidate: SearchCandidate, snapshot: OfferSnapshot) -> None:
+    if candidate.marketplace != snapshot.locator.marketplace:
+        raise ValueError("candidate and verified snapshot marketplace must match")
+    if candidate.listing_id != snapshot.locator.listing_id:
+        raise ValueError("candidate and verified snapshot listing must match")
+
+
 class VerifiedOfferStore:
     """Atomically persist trusted detail state, price events and buyer alerts."""
 
     def __init__(self, connection_factory: ConnectionFactory) -> None:
         self._connection_factory = connection_factory
+
+    async def _record_non_trusted_offer(
+        self,
+        product: TrackedProductRecord,
+        candidate: SearchCandidate,
+        snapshot: OfferSnapshot,
+        decision: OfferQualityDecision,
+        *,
+        verified_at: datetime,
+    ) -> OfferQualityWriteResult:
+        _validate_exact_pair(candidate, snapshot)
+        reason_codes_json = _reason_codes_json(decision)
+        attributes_json = json.dumps(dict(snapshot.attributes), ensure_ascii=False, sort_keys=True)
+        taxonomy_json = json.dumps(
+            _taxonomy_payload(candidate),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        variation_id = snapshot.locator.variation_id or candidate.variation_id or ""
+        seller_id = snapshot.locator.seller_id or candidate.seller_id
+        seller_name = snapshot.quality_signals.seller_name or candidate.seller_name
+        url = snapshot.locator.url or candidate.url
+        observation_count = max(decision.confirmation_count, 1)
+
+        async with self._connection_factory() as connection:
+            listing_cursor = await connection.execute(
+                """
+                INSERT INTO marketplace_listing (
+                    tracked_product_id, marketplace, listing_id, variation_id,
+                    seller_id, seller_name, canonical_url, title, attributes, taxonomy,
+                    active, last_seen_at, quality_status, quality_reason_codes,
+                    quality_observation_count, quality_checked_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb,
+                    TRUE, %s, %s, %s::jsonb, %s, %s
+                )
+                ON CONFLICT (tracked_product_id, marketplace, listing_id, variation_id)
+                DO UPDATE SET
+                    seller_id = EXCLUDED.seller_id,
+                    seller_name = EXCLUDED.seller_name,
+                    canonical_url = EXCLUDED.canonical_url,
+                    title = EXCLUDED.title,
+                    attributes = EXCLUDED.attributes,
+                    taxonomy = EXCLUDED.taxonomy,
+                    active = TRUE,
+                    last_seen_at = EXCLUDED.last_seen_at,
+                    quality_status = EXCLUDED.quality_status,
+                    quality_reason_codes = EXCLUDED.quality_reason_codes,
+                    quality_observation_count = GREATEST(
+                        marketplace_listing.quality_observation_count + 1,
+                        EXCLUDED.quality_observation_count
+                    ),
+                    quality_checked_at = EXCLUDED.quality_checked_at
+                RETURNING id
+                """,
+                (
+                    product.id,
+                    candidate.marketplace,
+                    candidate.listing_id,
+                    variation_id,
+                    seller_id,
+                    seller_name,
+                    url,
+                    snapshot.title,
+                    attributes_json,
+                    taxonomy_json,
+                    verified_at,
+                    decision.status.value,
+                    reason_codes_json,
+                    observation_count,
+                    verified_at,
+                ),
+            )
+            listing_row = await listing_cursor.fetchone()
+            if listing_row is None:
+                raise RuntimeError("marketplace listing upsert returned no row")
+            marketplace_listing_id = int(listing_row[0])
+
+            await connection.execute(
+                """
+                INSERT INTO offer_quality_observation (
+                    tracked_product_id, marketplace_listing_id, marketplace,
+                    listing_id, variation_id, seller_id, status, reason_codes,
+                    observed_price, reference_price, price_ratio,
+                    confirmation_count, observed_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s::jsonb,
+                    %s, %s, %s, %s, %s
+                )
+                """,
+                (
+                    product.id,
+                    marketplace_listing_id,
+                    candidate.marketplace,
+                    candidate.listing_id,
+                    variation_id or None,
+                    seller_id,
+                    decision.status.value,
+                    reason_codes_json,
+                    snapshot.price,
+                    decision.reference_price,
+                    decision.price_ratio,
+                    decision.confirmation_count,
+                    verified_at,
+                ),
+            )
+            await connection.commit()
+        return OfferQualityWriteResult(
+            marketplace_listing_id=marketplace_listing_id,
+            status=decision.status.value,
+        )
+
+    async def record_quarantined_offer(
+        self,
+        product: TrackedProductRecord,
+        candidate: SearchCandidate,
+        snapshot: OfferSnapshot,
+        decision: OfferQualityDecision,
+        *,
+        verified_at: datetime,
+    ) -> OfferQualityWriteResult:
+        if decision.status is not OfferQualityStatus.QUARANTINED:
+            raise ValueError("record_quarantined_offer requires a quarantined decision")
+        return await self._record_non_trusted_offer(
+            product,
+            candidate,
+            snapshot,
+            decision,
+            verified_at=verified_at,
+        )
+
+    async def record_quality_rejection(
+        self,
+        product: TrackedProductRecord,
+        candidate: SearchCandidate,
+        snapshot: OfferSnapshot,
+        decision: OfferQualityDecision,
+        *,
+        verified_at: datetime,
+    ) -> OfferQualityWriteResult:
+        if decision.status not in {OfferQualityStatus.REJECTED, OfferQualityStatus.UNAVAILABLE}:
+            raise ValueError("record_quality_rejection requires rejected or unavailable decision")
+        return await self._record_non_trusted_offer(
+            product,
+            candidate,
+            snapshot,
+            decision,
+            verified_at=verified_at,
+        )
 
     async def record_verified_offer(
         self,
@@ -97,10 +279,7 @@ class VerifiedOfferStore:
         verified_at: datetime,
         allow_alerts: bool = True,
     ) -> VerifiedOfferWriteResult:
-        if candidate.marketplace != snapshot.locator.marketplace:
-            raise ValueError("candidate and verified snapshot marketplace must match")
-        if candidate.listing_id != snapshot.locator.listing_id:
-            raise ValueError("candidate and verified snapshot listing must match")
+        _validate_exact_pair(candidate, snapshot)
 
         # Validate trusted price and timestamp before opening the transaction.
         PriceEvent(price=snapshot.price, observed_at=verified_at)
@@ -114,6 +293,7 @@ class VerifiedOfferStore:
         )
         url = snapshot.locator.url or candidate.url
         variation_id = snapshot.locator.variation_id or candidate.variation_id or ""
+        seller_name = snapshot.quality_signals.seller_name or candidate.seller_name
 
         async with self._connection_factory() as connection:
             listing_cursor = await connection.execute(
@@ -121,9 +301,13 @@ class VerifiedOfferStore:
                 INSERT INTO marketplace_listing (
                     tracked_product_id, marketplace, listing_id, variation_id,
                     seller_id, seller_name, canonical_url, title, attributes, taxonomy,
-                    active, last_seen_at
+                    active, last_seen_at, quality_status, quality_reason_codes,
+                    quality_observation_count, quality_checked_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, TRUE, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb,
+                    TRUE, %s, 'trusted', '[]'::jsonb, 1, %s
+                )
                 ON CONFLICT (tracked_product_id, marketplace, listing_id, variation_id)
                 DO UPDATE SET
                     seller_id = EXCLUDED.seller_id,
@@ -133,7 +317,11 @@ class VerifiedOfferStore:
                     attributes = EXCLUDED.attributes,
                     taxonomy = EXCLUDED.taxonomy,
                     active = TRUE,
-                    last_seen_at = EXCLUDED.last_seen_at
+                    last_seen_at = EXCLUDED.last_seen_at,
+                    quality_status = 'trusted',
+                    quality_reason_codes = '[]'::jsonb,
+                    quality_observation_count = marketplace_listing.quality_observation_count + 1,
+                    quality_checked_at = EXCLUDED.quality_checked_at
                 RETURNING id
                 """,
                 (
@@ -142,11 +330,12 @@ class VerifiedOfferStore:
                     candidate.listing_id,
                     variation_id,
                     snapshot.locator.seller_id or candidate.seller_id,
-                    candidate.seller_name,
+                    seller_name,
                     url,
                     snapshot.title,
                     attributes_json,
                     taxonomy_json,
+                    verified_at,
                     verified_at,
                 ),
             )
@@ -179,7 +368,13 @@ class VerifiedOfferStore:
                 )
 
             verification_meta = json.dumps(
-                {"source": snapshot.price_source, "verified": True},
+                {
+                    "source": snapshot.price_source,
+                    "verified": True,
+                    "quality_status": "trusted",
+                    "quality_signals": _quality_signal_payload(snapshot),
+                },
+                ensure_ascii=False,
                 sort_keys=True,
             )
             if state_unchanged:
@@ -188,6 +383,8 @@ class VerifiedOfferStore:
                     UPDATE listing_state
                     SET verified_at = %s,
                         verification_meta = %s::jsonb,
+                        quality_status = 'trusted',
+                        quality_reason_codes = '[]'::jsonb,
                         updated_at = NOW()
                     WHERE marketplace_listing_id = %s
                     """,
@@ -207,6 +404,7 @@ class VerifiedOfferStore:
                 SELECT public_price, verified_at
                 FROM price_event
                 WHERE tracked_product_id = %s
+                  AND quality_status = 'trusted'
                   AND public_price IS NOT NULL
                   AND verified_at >= %s
                   AND verified_at <= %s
@@ -229,9 +427,13 @@ class VerifiedOfferStore:
                 """
                 INSERT INTO listing_state (
                     marketplace_listing_id, public_price, conditional_prices,
-                    original_price, available, verified_at, verification_meta, updated_at
+                    original_price, available, verified_at, verification_meta,
+                    quality_status, quality_reason_codes, updated_at
                 )
-                VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, NOW())
+                VALUES (
+                    %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb,
+                    'trusted', '[]'::jsonb, NOW()
+                )
                 ON CONFLICT (marketplace_listing_id) DO UPDATE
                 SET public_price = EXCLUDED.public_price,
                     conditional_prices = EXCLUDED.conditional_prices,
@@ -239,6 +441,8 @@ class VerifiedOfferStore:
                     available = EXCLUDED.available,
                     verified_at = EXCLUDED.verified_at,
                     verification_meta = EXCLUDED.verification_meta,
+                    quality_status = 'trusted',
+                    quality_reason_codes = '[]'::jsonb,
                     updated_at = NOW()
                 """,
                 (
@@ -255,9 +459,9 @@ class VerifiedOfferStore:
                 """
                 INSERT INTO price_event (
                     tracked_product_id, marketplace_listing_id, public_price,
-                    conditional_prices, available, verified_at
+                    conditional_prices, available, verified_at, quality_status
                 )
-                VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s, 'trusted')
                 RETURNING id
                 """,
                 (

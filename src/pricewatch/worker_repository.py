@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from pricewatch.marketplaces import SearchCandidate
@@ -129,7 +130,8 @@ class PostgresWorkerRepository:
             cursor = await connection.execute(
                 """
                 SELECT marketplace, listing_id, variation_id, seller_id, seller_name,
-                       canonical_url, title, attributes::text, taxonomy::text
+                       canonical_url, title, attributes::text, taxonomy::text,
+                       quality_status, quality_observation_count
                 FROM marketplace_listing
                 WHERE tracked_product_id = %s
                   AND marketplace = %s
@@ -143,6 +145,8 @@ class PostgresWorkerRepository:
         result: list[SearchCandidate] = []
         for row in rows:
             attributes_payload = _json_object(row[7])
+            quality_status = str(row[9]) if len(row) > 9 and row[9] is not None else None
+            observation_count = int(row[10]) if len(row) > 10 and row[10] is not None else 0
             result.append(
                 SearchCandidate(
                     marketplace=str(row[0]),
@@ -156,9 +160,47 @@ class PostgresWorkerRepository:
                         str(key): str(value) for key, value in attributes_payload.items()
                     },
                     taxonomy=_taxonomy_from_json(row[8]),
+                    quality_status=quality_status,
+                    quality_observation_count=observation_count,
                 )
             )
         return tuple(result)
+
+    async def list_trusted_price_reference(
+        self,
+        product_id: int,
+        marketplace: str,
+        *,
+        since: datetime,
+    ) -> tuple[Decimal, ...]:
+        normalized_marketplace = marketplace.strip().casefold()
+        if not normalized_marketplace:
+            raise ValueError("marketplace must not be empty")
+        if since.tzinfo is None or since.utcoffset() is None:
+            raise ValueError("since must be timezone-aware")
+
+        async with self._connection_factory() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT latest.public_price
+                FROM (
+                    SELECT DISTINCT ON (pe.marketplace_listing_id)
+                           pe.marketplace_listing_id, pe.public_price, pe.verified_at
+                    FROM price_event pe
+                    JOIN marketplace_listing ml ON ml.id = pe.marketplace_listing_id
+                    WHERE pe.tracked_product_id = %s
+                      AND ml.marketplace = %s
+                      AND pe.quality_status = 'trusted'
+                      AND pe.public_price IS NOT NULL
+                      AND pe.verified_at >= %s
+                    ORDER BY pe.marketplace_listing_id, pe.verified_at DESC
+                ) AS latest
+                ORDER BY latest.marketplace_listing_id
+                """,
+                (product_id, normalized_marketplace, since),
+            )
+            rows = await cursor.fetchall()
+        return tuple(Decimal(str(row[0])) for row in rows if row and row[0] is not None)
 
     async def complete_scan(
         self,
