@@ -1,17 +1,17 @@
 from decimal import Decimal
 
+from pricewatch.offer_quality import (
+    OfferQualityContext,
+    OfferQualityReason,
+    OfferQualityStatus,
+    evaluate_offer_quality,
+)
 from pricewatch.marketplaces import (
     OfferCondition,
     OfferLocator,
     OfferQualitySignals,
     OfferSnapshot,
     SearchCandidate,
-)
-from pricewatch.offer_quality import (
-    OfferQualityContext,
-    OfferQualityReason,
-    OfferQualityStatus,
-    evaluate_offer_quality,
 )
 from pricewatch.search_plan import SearchPlan
 
