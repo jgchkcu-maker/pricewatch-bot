@@ -188,11 +188,12 @@ def test_history_groups_repeated_prices_into_one_level() -> None:
     ]
 
     view = render_price_history(_summary(), prices)
+    history_rows = view.text.split("Проверенные цены:\n", 1)[1]
 
-    assert view.text.count("17 990 ₽") == 2  # minimum summary + one price level
-    assert "впервые: 04.09.2026 07:30" in view.text
-    assert "последний раз: 06.09.2026 06:30" in view.text
-    assert view.text.count("18 490 ₽") == 2  # current summary + one price level
+    assert history_rows.count("17 990 ₽") == 1
+    assert "впервые: 04.09.2026 07:30" in history_rows
+    assert "последний раз: 06.09.2026 06:30" in history_rows
+    assert history_rows.count("18 490 ₽") == 1
 
 
 def test_nested_views_have_back_navigation() -> None:
