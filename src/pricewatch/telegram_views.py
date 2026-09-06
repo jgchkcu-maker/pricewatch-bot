@@ -365,7 +365,6 @@ def render_new_low(payload: Mapping[str, Any]) -> TelegramView:
             extra_price = f"\nПо Ozon Карте: {_format_rub(str(card_price))}\n"
 
     rating_link = _rating_review_link(payload)
-    rating_block = f"\n{rating_link[0]}\n" if rating_link is not None else ""
     buttons: list[list[dict[str, str]]] = [
         [{"text": "🛒 Открыть товар", "url": url}]
     ]
@@ -380,8 +379,7 @@ def render_new_low(payload: Mapping[str, Any]) -> TelegramView:
             f"{price} • {marketplace}\n"
             f"{extra_price}\n"
             f"Было минимум: {previous}\n"
-            f"Снижение: {delta} · {percent}%\n"
-            f"{rating_block}\n"
+            f"Снижение: {delta} · {percent}%\n\n"
             "Цена проверена на карточке товара только что."
         ),
         reply_markup={"inline_keyboard": buttons},
