@@ -37,6 +37,10 @@ def test_wb_adapter_builds_current_v9_search_request() -> None:
     assert request.params["dest"] == "-1257786"
     assert request.params["resultset"] == "catalog"
     assert request.params["curr"] == "rub"
+    assert "Mozilla/5.0" in request.headers["User-Agent"]
+    assert request.headers["Referer"] == "https://www.wildberries.ru/"
+    assert "application/json" in request.headers["Accept"]
+    assert request.headers["Accept-Language"].startswith("ru-RU")
 
 
 def test_ozon_adapter_builds_composer_search_request() -> None:
@@ -49,6 +53,10 @@ def test_ozon_adapter_builds_composer_search_request() -> None:
     request = fetcher.requests[0]
     assert request.url == "https://www.ozon.ru/api/composer-api.bx/page/json/v2"
     assert request.params == {"url": "/search/?text=xiaomi pad 7 8 256&page=3"}
+    assert "Mozilla/5.0" in request.headers["User-Agent"]
+    assert request.headers["Referer"] == "https://www.ozon.ru/"
+    assert "application/json" in request.headers["Accept"]
+    assert request.headers["Accept-Language"].startswith("ru-RU")
 
 
 def test_ozon_adapter_uses_category_scope_when_supplied() -> None:
