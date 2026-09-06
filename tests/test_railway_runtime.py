@@ -16,15 +16,15 @@ def _settings() -> Settings:
     )
 
 
-def test_railway_bootstraps_schema_once_before_starting_bot_and_worker(monkeypatch) -> None:
+def test_railway_bootstraps_all_runtime_migrations_once_before_services(monkeypatch) -> None:
     events: list[object] = []
 
     class DummyConnectionFactory:
         def __init__(self, database_url: str) -> None:
             events.append(("factory", database_url))
 
-    async def fake_apply_sql_file(connection_factory, path: str) -> None:
-        events.append(("bootstrap", path))
+    async def fake_apply_runtime_schema(connection_factory) -> None:
+        events.append(("bootstrap", "all_runtime_migrations"))
 
     async def fake_run_bot(settings: Settings, *, bootstrap_schema: bool) -> None:
         events.append(("bot", bootstrap_schema))
@@ -33,14 +33,14 @@ def test_railway_bootstraps_schema_once_before_starting_bot_and_worker(monkeypat
         events.append(("worker", bootstrap_schema))
 
     monkeypatch.setattr(main_railway, "PsycopgConnectionFactory", DummyConnectionFactory)
-    monkeypatch.setattr(main_railway, "apply_sql_file", fake_apply_sql_file)
+    monkeypatch.setattr(main_railway, "apply_runtime_schema", fake_apply_runtime_schema)
     monkeypatch.setattr(main_railway, "run_bot", fake_run_bot)
     monkeypatch.setattr(main_railway, "run_worker", fake_run_worker)
 
     asyncio.run(main_railway.run_railway(_settings()))
 
     assert events[0][0] == "factory"
-    assert events[1] == ("bootstrap", "sql/001_runtime.sql")
-    assert events.count(("bootstrap", "sql/001_runtime.sql")) == 1
+    assert events[1] == ("bootstrap", "all_runtime_migrations")
+    assert events.count(("bootstrap", "all_runtime_migrations")) == 1
     assert ("bot", False) in events
     assert ("worker", False) in events
