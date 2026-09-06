@@ -80,3 +80,14 @@ def test_user_summary_separates_current_best_from_rolling_seven_day_minimum() ->
     sql = "\n".join(query for query, _ in connection.calls).lower()
     assert "order by current_state.public_price asc" in sql
     assert "min(pe.public_price)" in sql
+
+
+def test_user_summary_excludes_legacy_and_quarantined_price_state() -> None:
+    connection = FakeConnection()
+    repository = RuntimeRepository(FakeFactory(connection))
+
+    asyncio.run(repository.list_user_products(11))
+
+    sql = " ".join("\n".join(query for query, _ in connection.calls).lower().split())
+    assert "current_state.quality_status = 'trusted'" in sql
+    assert "pe.quality_status = 'trusted'" in sql
