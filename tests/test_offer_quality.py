@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from decimal import Decimal
 
 from pricewatch.offer_quality import (
