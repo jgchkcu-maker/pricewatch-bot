@@ -69,8 +69,8 @@ def test_ozon_offer_extracts_optional_quality_signals() -> None:
 def test_ozon_offer_reads_product_rating_widget() -> None:
     snapshot = parse_offer_payload(fixture("ozon_detail_minimal.json"), locator())
 
-    assert snapshot.rating == Decimal("4.9")
-    assert snapshot.review_count == 731
+    assert snapshot.rating == Decimal("4.8")
+    assert snapshot.review_count == 12436
 
 
 def test_ozon_missing_or_malformed_optional_metadata_does_not_block_price() -> None:

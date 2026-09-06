@@ -7,7 +7,7 @@
     "webAddToCart-104-default-1": "{\"firstButton\":{\"sku\":\"123456789\"},\"secondButton\":{\"sku\":\"123456789\"}}",
     "webShortCharacteristics-105-default-1": "{\"characteristics\":[{\"title\":{\"textRs\":[{\"content\":\"Модель\"}]},\"values\":[{\"text\":\"Pad 7\"}]},{\"title\":{\"textRs\":[{\"content\":\"Оперативная память\"}]},\"values\":[{\"text\":\"8 ГБ\"}]},{\"title\":{\"textRs\":[{\"content\":\"Встроенная память\"}]},\"values\":[{\"text\":\"256 ГБ\"}]}]}",
     "webCurrentSeller-106-default-1": "{\"sellerCell\":{\"centerBlock\":{\"title\":{\"text\":\"Example Store\"}}},\"rating\":{\"title\":{\"text\":\"4,7\"}}}",
-    "webReviewProductScore-107-default-1": "{\"totalScore\":4.9,\"reviewsCount\":731}",
+    "webReviewProductScore-107-default-1": "{\"totalScore\":4.8,\"reviewsCount\":12436}",
     "labelListV2-108-default-1": "{\"items\":[{\"title\":{\"text\":\"Оригинал\"}},{\"title\":{\"text\":\"Хит\"}}]}"
   }
 }
