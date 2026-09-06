@@ -156,7 +156,12 @@ def test_history_shows_timestamped_prices_sorted_from_min_to_max() -> None:
     assert "17 990 ₽" in text
     assert "18 490 ₽" in text
     assert "20 990 ₽" in text
-    assert text.index("17 990 ₽") < text.index("18 490 ₽") < text.index("20 990 ₽")
+    history_rows = text.split("Проверенные цены:\n", 1)[1]
+    assert (
+        history_rows.index("17 990 ₽")
+        < history_rows.index("18 490 ₽")
+        < history_rows.index("20 990 ₽")
+    )
     assert "06.09.2026" in text
     assert ":" in text
     assert "product:7" in str(telegram.edited[-1][3])
