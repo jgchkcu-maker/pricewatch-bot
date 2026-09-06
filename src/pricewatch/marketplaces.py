@@ -21,6 +21,7 @@ class OfferIdentityError(ValueError):
 class SearchRequest:
     url: str
     params: Mapping[str, str] = field(default_factory=dict)
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 class JsonFetcher(Protocol):
