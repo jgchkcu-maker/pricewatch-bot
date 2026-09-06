@@ -137,6 +137,8 @@ class PriceWorker:
                 retry_after_seconds = max(retry_after_seconds or 0, 900)
 
         success = successful_marketplaces > 0
+        if not success and product.last_successful_scan_at is None:
+            retry_after_seconds = min(retry_after_seconds or 300, 300)
         await self._repository.complete_scan(
             product.id,
             now=now,
