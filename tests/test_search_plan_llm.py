@@ -1,10 +1,13 @@
+import asyncio
 import json
 
+import httpx
 import pytest
 
 from pricewatch.search_plan_llm import (
     DEFAULT_SEARCH_PLAN_MODEL,
     SEARCH_PLAN_SYSTEM_PROMPT,
+    GeminiSearchPlanProvider,
     SearchPlanPayloadError,
     parse_search_plan_response,
 )
@@ -24,6 +27,8 @@ def test_prompt_is_strict_about_universal_identity_and_query_spam() -> None:
     assert "mpn" in prompt
     assert "preserve" in prompt
     assert "7 aliases" in prompt
+    assert "pro" in prompt
+    assert "max" in prompt
     assert DEFAULT_SEARCH_PLAN_MODEL == "gemini-3.5-flash-lite"
 
 
@@ -88,3 +93,97 @@ def test_parse_search_plan_response_requires_primary_and_canonical_name() -> Non
                 }
             )
         )
+
+
+def test_provider_retries_when_russian_pro_modifier_is_dropped() -> None:
+    requests: list[dict[str, object]] = []
+    responses = [
+        {
+            "canonical_name": "Apple AirPods 3",
+            "product_type": "wireless headphones",
+            "primary_query": "Apple AirPods 3",
+            "aliases": ["AirPods 3"],
+            "required_tokens": ["AirPods", "3"],
+            "excluded_terms": ["case", "чехол"],
+            "identity_attributes": {
+                "brand": "Apple",
+                "model": "AirPods 3",
+                "generation": "3",
+            },
+        },
+        {
+            "canonical_name": "Apple AirPods Pro 3",
+            "product_type": "wireless headphones",
+            "primary_query": "Apple AirPods Pro 3",
+            "aliases": ["AirPods Pro 3", "Аирподс Про 3"],
+            "required_tokens": ["AirPods", "Pro", "3"],
+            "excluded_terms": ["AirPods 3", "AirPods Max", "case", "чехол"],
+            "identity_attributes": {
+                "brand": "Apple",
+                "model": "AirPods Pro",
+                "generation": "3",
+                "edition": "Pro",
+            },
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        plan = responses[len(requests) - 1]
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"content": {"parts": [{"text": json.dumps(plan, ensure_ascii=False)}]}}
+                ]
+            },
+        )
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="key", client=http)
+    plan = asyncio.run(provider.create_plan("аирподс 3 про"))
+    asyncio.run(http.aclose())
+
+    assert len(requests) == 2
+    assert plan.canonical_name == "Apple AirPods Pro 3"
+    assert plan.primary_query == "apple airpods pro 3"
+    assert plan.identity_attributes["edition"] == "pro"
+    retry_text = requests[1]["contents"][0]["parts"][0]["text"]
+    assert "pro" in str(retry_text).casefold()
+
+
+def test_provider_does_not_retry_when_critical_modifier_is_preserved() -> None:
+    requests = 0
+    payload = {
+        "canonical_name": "Samsung Galaxy S25 Ultra",
+        "product_type": "smartphone",
+        "primary_query": "Samsung Galaxy S25 Ultra",
+        "aliases": [],
+        "required_tokens": ["Samsung", "S25", "Ultra"],
+        "excluded_terms": ["S25", "S25 Plus", "case"],
+        "identity_attributes": {
+            "brand": "Samsung",
+            "model": "Galaxy S25 Ultra",
+            "edition": "Ultra",
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [
+                    {"content": {"parts": [{"text": json.dumps(payload)}]}}
+                ]
+            },
+        )
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="key", client=http)
+    plan = asyncio.run(provider.create_plan("Samsung S25 Ultra"))
+    asyncio.run(http.aclose())
+
+    assert requests == 1
+    assert plan.canonical_name == "Samsung Galaxy S25 Ultra"
