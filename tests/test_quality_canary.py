@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 import asyncio
 from decimal import Decimal
 
