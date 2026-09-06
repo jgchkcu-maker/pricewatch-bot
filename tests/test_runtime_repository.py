@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -86,6 +87,10 @@ class FakeConnection:
             )
         if "insert into subscription" in normalized:
             return FakeCursor((77, 11, 42, "active"))
+        if normalized.startswith("select public_price, verified_at from price_event"):
+            return FakeCursor(
+                rows=[(Decimal("24990"), datetime(2026, 9, 5, 12, 0, tzinfo=UTC))]
+            )
         return FakeCursor()
 
     async def commit(self) -> None:
@@ -191,3 +196,21 @@ def test_price_history_retention_keeps_one_day_buffer_after_seven_day_window() -
     )
     assert "verified_at < %s" in " ".join(prune_query.lower().split())
     assert params == (now - timedelta(days=8),)
+
+
+def test_recent_public_prices_excludes_non_trusted_events() -> None:
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
+    connection = FakeConnection()
+    repository = RuntimeRepository(FakeFactory(connection))
+
+    prices = asyncio.run(
+        repository.recent_public_prices(42, since=now - timedelta(days=7))
+    )
+
+    assert prices == [(Decimal("24990"), now)]
+    query = next(
+        query
+        for query, _ in connection.calls
+        if "from price_event" in query.lower() and "select public_price" in query.lower()
+    )
+    assert "quality_status = 'trusted'" in " ".join(query.lower().split())
