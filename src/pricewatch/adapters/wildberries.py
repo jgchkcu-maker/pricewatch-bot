@@ -7,6 +7,7 @@ from pricewatch.marketplaces import (
     JsonFetcher,
     OfferIdentityError,
     OfferLocator,
+    OfferQualitySignals,
     OfferSnapshot,
     ParserDriftError,
     SearchCandidate,
@@ -65,6 +66,16 @@ def _review_count(value: object) -> int | None:
     return None
 
 
+def _product_for_listing(payload: dict[str, Any], listing_id: str) -> dict[str, Any] | None:
+    products = payload.get("products")
+    if not isinstance(products, list):
+        return None
+    for product in products:
+        if isinstance(product, dict) and _string(product.get("id")) == listing_id:
+            return product
+    return None
+
+
 def _product_rating(
     payload: dict[str, Any],
     listing_id: str,
@@ -74,17 +85,32 @@ def _product_rating(
     ``supplierRating`` is intentionally never consulted: it belongs to the
     seller, while alerts must show the rating of the concrete product card.
     """
-    products = payload.get("products")
-    if not isinstance(products, list):
+    product = _product_for_listing(payload, listing_id)
+    if product is None:
         return None, None
-    for product in products:
-        if not isinstance(product, dict) or _string(product.get("id")) != listing_id:
-            continue
-        rating = _rating(product.get("reviewRating"))
-        if rating is None:
-            rating = _rating(product.get("rating"))
-        return rating, _review_count(product.get("feedbacks"))
-    return None, None
+    rating = _rating(product.get("reviewRating"))
+    if rating is None:
+        rating = _rating(product.get("rating"))
+    return rating, _review_count(product.get("feedbacks"))
+
+
+def _quality_signals(
+    payload: dict[str, Any],
+    candidate: SearchCandidate,
+) -> OfferQualitySignals:
+    """Read optional seller metadata from the same exact WB product object.
+
+    Unknown native shapes intentionally remain unknown. Product review fields
+    stay separate from seller rating, and no authenticity/condition signal is
+    inferred when the captured payload does not expose one.
+    """
+    product = _product_for_listing(payload, candidate.listing_id)
+    if product is None:
+        return OfferQualitySignals()
+    return OfferQualitySignals(
+        seller_name=_string(product.get("supplier")),
+        seller_rating=_rating(product.get("supplierRating")),
+    )
 
 
 def _taxonomy(product: dict[str, Any]) -> MarketplaceTaxonomy | None:
@@ -218,6 +244,7 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
         price_source="card",
         rating=rating,
         review_count=review_count,
+        quality_signals=_quality_signals(payload, candidate),
     )
 
 
