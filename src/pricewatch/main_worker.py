@@ -21,9 +21,10 @@ from pricewatch.worker_repository import PostgresWorkerRepository
 LOGGER = logging.getLogger(__name__)
 
 
-async def run_worker(settings: Settings) -> None:
+async def run_worker(settings: Settings, *, bootstrap_schema: bool = True) -> None:
     connection_factory = PsycopgConnectionFactory(settings.database_url)
-    await apply_sql_file(connection_factory, "sql/001_runtime.sql")
+    if bootstrap_schema:
+        await apply_sql_file(connection_factory, "sql/001_runtime.sql")
     learning_store = PostgresLearningStateStore(connection_factory)
     await learning_store.initialize()
 
