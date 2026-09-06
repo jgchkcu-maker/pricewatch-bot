@@ -51,11 +51,11 @@ pricewatch-scheduled
 
 A scheduled pass:
 
-1. bootstraps the PostgreSQL schema idempotently;
+1. bootstraps all PostgreSQL runtime migrations idempotently;
 2. claims due shared products with the existing PostgreSQL lease/`SKIP LOCKED` logic;
 3. polls known listings and performs marketplace discovery;
-4. verifies exact detail identity and price before trusting an offer;
-5. persists price events / new-low outbox rows;
+4. verifies exact detail identity, then evaluates offer quality before trusting a price;
+5. persists trusted price events / new-low outbox rows while quarantined and rejected offers remain diagnostic-only;
 6. dispatches pending Telegram notifications;
 7. prunes old price events while retaining current trusted `listing_state`.
 
@@ -77,10 +77,13 @@ The marketplace worker:
 - runs marketplace discovery when needed;
 - applies taxonomy and identity matching;
 - fetches the concrete listing detail before trusting a price;
-- persists only exact-detail verified offer state;
-- creates a Telegram alert only when a newly verified public price is below the previous rolling 7-day minimum.
+- applies a deterministic quality gate to exact verified offers;
+- persists price/history state only for offers classified as trusted;
+- creates a Telegram alert only when a newly trusted public price is below the previous rolling 7-day minimum.
 
-The first verified observation establishes a baseline and does **not** create a fake “new minimum” alert. Search preview prices are discovery-only. Conditional prices such as Ozon Card remain separate from the normal public-price baseline.
+When no trusted price baseline exists, the first exact observation is quarantined for confirmation instead of becoming price history immediately. A stable repeated exact observation can establish the baseline without producing a fake “new minimum” alert. Search preview prices are discovery-only. Conditional prices such as Ozon Card remain separate from the normal public-price baseline.
+
+A very low price alone is never labelled counterfeit. For example, an otherwise exact `827 ₽` observation against a normal trusted baseline is a price outlier and is quarantined. Explicit wording such as “копия”, “реплика” or “fake” is separate hard evidence and is rejected with its own reason code.
 
 ## Required configuration
 
@@ -147,6 +150,20 @@ pricewatch-scheduled  # one bounded worker/outbox/maintenance pass for GitHub Ac
 
 The long-running entrypoints remain available for Docker/VPS deployments, but the recommended no-VPS production topology is Vercel + GitHub Actions + managed PostgreSQL.
 
+## No-write marketplace quality canary
+
+For diagnostic verification against current marketplace responses, run:
+
+```bash
+python scripts/quality_canary.py --marketplace both --query "AirPods Pro 3" --limit 10
+```
+
+The canary uses the normal Ozon/Wildberries search adapters, exact detail verification and the same offer-quality policy as the worker, but it accepts no repository or store object. It therefore cannot create `listing_state`, `price_event` or notification-outbox rows. Output is JSON counters and reason codes only; raw marketplace payloads and credentials are never emitted.
+
+A healthy empty marketplace result is reported as zero results. Access blocks, rate limits, transport failures or parser drift produce a non-zero exit. In particular, Ozon may reject generic HTTP clients or cloud egress even when the parser itself is healthy; that means marketplace access is unknown for that run, not that there are no offers. The canary does not attempt CAPTCHA solving, browser-profile spoofing or any other access-control bypass.
+
+With no persisted trusted reference supplied to the CLI, a first exact live observation can remain quarantined for baseline confirmation. Offline fixture coverage supplies known peer prices and separately verifies the stronger `PRICE_OUTLIER` path for an AirPods-like `827 ₽` observation.
+
 ## Local development
 
 Requires Python 3.12+.
@@ -170,11 +187,13 @@ CI runs the same Ruff + pytest checks on GitHub Actions.
 - global tracked-product deduplication with per-user subscriptions;
 - PostgreSQL worker leases using row locking / `SKIP LOCKED`;
 - direct known-listing polling before discovery;
+- quarantined/rejected/unavailable offers cannot enter trusted price history or buyer alerts;
+- buyer-facing current price, recent prices and rolling 7-day minimum use trusted rows only;
 - rolling 7-day price logic and trusted `listing_state` retention;
 - durable notification outbox with claim timeout and bounded retry;
 - blocked Telegram delivery does not pause product tracking;
 - buyer-facing Telegram flow with add/confirm/edit/cancel/list/pagination/pause/resume/history;
-- deterministic vertical-slice coverage for baseline/no-alert, real new-low alerts, two subscribers and wrong-model/accessory rejection.
+- deterministic vertical-slice coverage for baseline confirmation/no-alert, real new-low alerts, two subscribers and wrong-model/accessory rejection.
 
 ## Optional Docker deployment
 
