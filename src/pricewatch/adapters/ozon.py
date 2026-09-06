@@ -34,6 +34,29 @@ def _parse_rub_price(value: object) -> Decimal | None:
     return price if price > 0 else None
 
 
+def _parse_rating(value: object) -> Decimal | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        rating = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    return rating if Decimal("0") < rating <= Decimal("5") else None
+
+
+def _parse_review_count(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float):
+        return int(value) if value >= 0 and value.is_integer() else None
+    if isinstance(value, str):
+        text = value.strip()
+        return int(text) if text.isdigit() else None
+    return None
+
+
 def _canonical_url(link: object, sku: str) -> str:
     if not isinstance(link, str) or not link.strip():
         return f"{_OZON_ORIGIN}/product/{sku}/"
@@ -87,6 +110,24 @@ def _required_widget(payload: dict[str, Any], name: str) -> dict[str, Any]:
     if not matches:
         raise ParserDriftError(f"Ozon detail payload is missing required {name} widget")
     return matches[0]
+
+
+def _product_rating(payload: dict[str, Any]) -> tuple[Decimal | None, int | None]:
+    """Best-effort product score from the PDP review widget.
+
+    Rating metadata is intentionally optional and must never make a verified
+    price observation fail if Ozon removes or reshapes this widget.
+    """
+    try:
+        widgets = _widgets(payload, "webReviewProductScore")
+    except ParserDriftError:
+        return None, None
+    for widget in widgets:
+        rating = _parse_rating(widget.get("totalScore"))
+        review_count = _parse_review_count(widget.get("reviewsCount"))
+        if rating is not None or review_count is not None:
+            return rating, review_count
+    return None, None
 
 
 def _rich_text(nodes: object) -> str:
@@ -306,6 +347,7 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
     if card_price is not None:
         conditional_prices["ozon_card"] = card_price
 
+    rating, review_count = _product_rating(payload)
     verified_locator = OfferLocator(
         marketplace="ozon",
         listing_id=sku,
@@ -322,6 +364,8 @@ def parse_offer_payload(payload: dict[str, Any], locator: OfferLocator) -> Offer
         available=True,
         attributes=_detail_attributes(payload),
         price_source="card",
+        rating=rating,
+        review_count=review_count,
     )
 
 
