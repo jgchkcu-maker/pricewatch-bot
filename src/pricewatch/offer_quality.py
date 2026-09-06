@@ -217,8 +217,6 @@ def _looks_accessory_only(plan: SearchPlan, title: str) -> bool:
 def _has_explicit_counterfeit_wording(plan: SearchPlan, title: str) -> bool:
     if _target_is_accessory(plan):
         return False
-    if not plan.identity_attributes.get("brand"):
-        return False
 
     padded = _padded(title)
     if not padded:
@@ -258,36 +256,30 @@ def _confirmation_count(context: OfferQualityContext) -> int:
 
 
 def _price_reference(
-    price: Decimal,
-    context: OfferQualityContext,
+    prices: tuple[Decimal, ...],
     policy: OfferQualityPolicy,
-) -> tuple[Decimal | None, Decimal | None, bool]:
-    trusted = _valid_reference_prices(context.trusted_prices)
-    if not trusted:
-        return None, None, False
-
-    reference = _median(trusted)
-    ratio = price / reference
-    extreme_low = ratio < policy.extreme_low_ratio
-
-    if len(trusted) >= policy.min_reference_samples:
-        deviations = tuple(abs(value - reference) for value in trusted)
-        mad = _median(deviations)
-        if mad > 0 and price < reference - policy.mad_multiplier * mad:
-            extreme_low = True
-
-    return reference, ratio, extreme_low
+) -> tuple[Decimal | None, Decimal | None]:
+    valid = _valid_reference_prices(prices)
+    if not valid:
+        return None, None
+    reference = _median(valid)
+    if len(valid) < policy.min_reference_samples:
+        return reference, None
+    deviations = tuple(abs(value - reference) for value in valid)
+    return reference, _median(deviations)
 
 
-def _has_trusted_seller(
-    candidate: SearchCandidate,
-    snapshot: OfferSnapshot,
-    context: OfferQualityContext,
+def _is_price_outlier(
+    price: Decimal,
+    reference: Decimal,
+    mad: Decimal | None,
+    policy: OfferQualityPolicy,
 ) -> bool:
-    seller_ids = {
-        value for value in (candidate.seller_id, snapshot.locator.seller_id) if value
-    }
-    return bool(seller_ids.intersection(context.trusted_seller_ids))
+    if price / reference < policy.extreme_low_ratio:
+        return True
+    if mad is None or mad == 0:
+        return False
+    return abs(price - reference) > policy.mad_multiplier * mad
 
 
 def evaluate_offer_quality(
@@ -297,101 +289,86 @@ def evaluate_offer_quality(
     context: OfferQualityContext = _DEFAULT_CONTEXT,
     policy: OfferQualityPolicy = _DEFAULT_POLICY,
 ) -> OfferQualityDecision:
-    """Classify one identity-verified exact offer without external side effects."""
+    """Classify one exact verified offer without I/O or marketplace side effects."""
     if not candidate.listing_id.strip() or not snapshot.locator.listing_id.strip():
         return OfferQualityDecision(
             OfferQualityStatus.REJECTED,
             (OfferQualityReason.MISSING_LISTING_ID,),
         )
-
-    detail_title = snapshot.title.strip()
-    if not detail_title:
+    if not snapshot.title.strip():
         return OfferQualityDecision(
             OfferQualityStatus.REJECTED,
             (OfferQualityReason.MISSING_TITLE,),
         )
-
-    if snapshot.available is False:
-        return OfferQualityDecision(
-            OfferQualityStatus.UNAVAILABLE,
-            (OfferQualityReason.UNAVAILABLE,),
-        )
-
-    price = snapshot.price
-    if not isinstance(price, Decimal) or price <= 0:
+    if snapshot.price <= 0:
         return OfferQualityDecision(
             OfferQualityStatus.REJECTED,
             (OfferQualityReason.MISSING_PRICE,),
         )
-
-    if _looks_accessory_only(plan, detail_title):
+    if not snapshot.available:
+        return OfferQualityDecision(
+            OfferQualityStatus.UNAVAILABLE,
+            (OfferQualityReason.UNAVAILABLE,),
+        )
+    if _looks_accessory_only(plan, snapshot.title):
         return OfferQualityDecision(
             OfferQualityStatus.REJECTED,
             (OfferQualityReason.ACCESSORY_ONLY,),
         )
-
-    if _has_explicit_counterfeit_wording(plan, detail_title):
+    if _has_explicit_counterfeit_wording(plan, snapshot.title):
         return OfferQualityDecision(
             OfferQualityStatus.REJECTED,
             (OfferQualityReason.EXPLICIT_COUNTERFEIT,),
         )
-
     if _condition_conflicts(plan, snapshot):
         return OfferQualityDecision(
             OfferQualityStatus.REJECTED,
             (OfferQualityReason.CONDITION_CONFLICT,),
         )
 
-    reference, ratio, extreme_low = _price_reference(price, context, policy)
-    confirmations = _confirmation_count(context)
-
-    if extreme_low:
-        if (
-            context.prior_status is OfferQualityStatus.QUARANTINED
-            and confirmations >= policy.required_confirmations
-        ):
+    reference, mad = _price_reference(context.trusted_prices, policy)
+    confirmation_count = _confirmation_count(context)
+    if reference is None:
+        if confirmation_count >= policy.required_confirmations:
             return OfferQualityDecision(
                 OfferQualityStatus.TRUSTED,
-                (OfferQualityReason.PRICE_OUTLIER,),
-                reference_price=reference,
-                price_ratio=ratio,
-                confirmation_count=confirmations,
+                (),
+                confirmation_count=confirmation_count,
             )
         return OfferQualityDecision(
             OfferQualityStatus.QUARANTINED,
-            (OfferQualityReason.PRICE_OUTLIER, OfferQualityReason.NEEDS_CONFIRMATION),
-            reference_price=reference,
-            price_ratio=ratio,
-            confirmation_count=confirmations,
+            (
+                OfferQualityReason.NO_PRICE_BASELINE,
+                OfferQualityReason.NEEDS_CONFIRMATION,
+            ),
+            confirmation_count=confirmation_count,
         )
 
-    if reference is None:
-        already_trusted = context.prior_status is OfferQualityStatus.TRUSTED
-        trusted_seller = _has_trusted_seller(candidate, snapshot, context)
-        official_badge = bool(snapshot.quality_signals.authenticity_badges)
-        if not (already_trusted or trusted_seller or official_badge):
-            if (
-                context.prior_status is OfferQualityStatus.QUARANTINED
-                and confirmations >= policy.required_confirmations
-            ):
-                return OfferQualityDecision(
-                    OfferQualityStatus.TRUSTED,
-                    (OfferQualityReason.NO_PRICE_BASELINE,),
-                    confirmation_count=confirmations,
-                )
+    price_ratio = snapshot.price / reference
+    if _is_price_outlier(snapshot.price, reference, mad, policy):
+        if confirmation_count >= policy.required_confirmations:
             return OfferQualityDecision(
-                OfferQualityStatus.QUARANTINED,
-                (
-                    OfferQualityReason.NO_PRICE_BASELINE,
-                    OfferQualityReason.NEEDS_CONFIRMATION,
-                ),
-                confirmation_count=confirmations,
+                OfferQualityStatus.TRUSTED,
+                (),
+                reference_price=reference,
+                price_ratio=price_ratio,
+                confirmation_count=confirmation_count,
             )
+        return OfferQualityDecision(
+            OfferQualityStatus.QUARANTINED,
+            (
+                OfferQualityReason.PRICE_OUTLIER,
+                OfferQualityReason.NEEDS_CONFIRMATION,
+            ),
+            reference_price=reference,
+            price_ratio=price_ratio,
+            confirmation_count=confirmation_count,
+        )
 
     return OfferQualityDecision(
         OfferQualityStatus.TRUSTED,
         (),
         reference_price=reference,
-        price_ratio=ratio,
-        confirmation_count=confirmations,
+        price_ratio=price_ratio,
+        confirmation_count=confirmation_count,
     )
