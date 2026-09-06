@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -190,6 +191,13 @@ class MemoryRuntime:
     async def list_known_candidates(self, product_id, marketplace):
         return tuple(self.known.get((product_id, marketplace), {}).values())
 
+    async def list_trusted_price_reference(self, product_id, marketplace, *, since):
+        return tuple(
+            event.price
+            for event in self.events.get(product_id, [])
+            if event.observed_at >= since
+        )
+
     async def complete_scan(
         self,
         product_id,
@@ -216,6 +224,49 @@ class MemoryRuntime:
     async def record_taxonomy_positive(self, product, candidate):
         return None
 
+    def _save_known(self, product, candidate, *, status, observation_count):
+        self.known.setdefault((product.id, candidate.marketplace), {})[
+            candidate.listing_id
+        ] = replace(
+            candidate,
+            quality_status=status,
+            quality_observation_count=observation_count,
+        )
+
+    async def record_quarantined_offer(
+        self,
+        product,
+        candidate,
+        snapshot,
+        decision,
+        *,
+        verified_at,
+    ):
+        self._save_known(
+            product,
+            candidate,
+            status=decision.status.value,
+            observation_count=decision.confirmation_count,
+        )
+        return None
+
+    async def record_quality_rejection(
+        self,
+        product,
+        candidate,
+        snapshot,
+        decision,
+        *,
+        verified_at,
+    ):
+        self._save_known(
+            product,
+            candidate,
+            status=decision.status.value,
+            observation_count=max(decision.confirmation_count, 1),
+        )
+        return None
+
     async def record_verified_offer(
         self,
         product,
@@ -225,9 +276,12 @@ class MemoryRuntime:
         verified_at,
         allow_alerts=True,
     ):
-        self.known.setdefault((product.id, candidate.marketplace), {})[
-            candidate.listing_id
-        ] = candidate
+        self._save_known(
+            product,
+            candidate,
+            status="trusted",
+            observation_count=max(candidate.quality_observation_count + 1, 1),
+        )
         history = self.events.setdefault(product.id, [])
         if history and history[-1].price == snapshot.price:
             return None
@@ -396,22 +450,30 @@ def test_two_users_share_one_worker_product_and_receive_verified_new_low_alerts(
     )
 
     assert asyncio.run(worker.run_once(START)) == 1
-    assert runtime.events[product.id][-1].price == Decimal("29490")
+    assert runtime.events.get(product.id, []) == []
     assert runtime.outbox == []
     assert adapter.search_preview_price == Decimal("799")
+    known = runtime.known[(product.id, "wildberries")]["123"]
+    assert known.quality_status == "quarantined"
+    assert known.quality_observation_count == 1
+
+    baseline_scan = START + timedelta(minutes=4)
+    assert asyncio.run(worker.run_once(baseline_scan)) == 1
+    assert [event.price for event in runtime.events[product.id]] == [Decimal("29490")]
+    assert runtime.outbox == []
 
     adapter.detail_price = Decimal("24990")
-    second_scan = START + timedelta(minutes=4)
-    assert asyncio.run(worker.run_once(second_scan)) == 1
+    discount_scan = START + timedelta(minutes=8)
+    assert asyncio.run(worker.run_once(discount_scan)) == 1
     assert [event.price for event in runtime.events[product.id]] == [
         Decimal("29490"),
         Decimal("24990"),
     ]
     assert len(runtime.outbox) == 2
-    assert runtime.claim_count == 2
+    assert runtime.claim_count == 3
 
     dispatcher = OutboxDispatcher(store=runtime, telegram=telegram)
-    assert asyncio.run(dispatcher.run_once(now=second_scan)) == 2
+    assert asyncio.run(dispatcher.run_once(now=discount_scan)) == 2
     alerts = [text for _, text, _ in telegram.messages if "НОВАЯ МИНИМАЛЬНАЯ" in text]
     assert len(alerts) == 2
     alert_markups = [
