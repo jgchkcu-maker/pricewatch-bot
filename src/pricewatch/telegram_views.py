@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -20,7 +21,7 @@ def _inline_keyboard(*rows: list[dict[str, str]]) -> dict[str, Any]:
     return {"inline_keyboard": list(rows)}
 
 
-def _format_rub(value: Decimal | str) -> str:
+def _format_rub(value: Decimal | str | int) -> str:
     number = Decimal(str(value))
     integral = int(number.quantize(Decimal("1")))
     return f"{integral:,}".replace(",", " ") + " ₽"
@@ -92,7 +93,7 @@ def render_confirmation(plan: SearchPlan, *, confirmation_id: str) -> TelegramVi
         reply_markup=_inline_keyboard(
             [{"text": "✅ Всё верно", "callback_data": f"confirm:{confirmation_id}"}],
             [{"text": "✏️ Изменить", "callback_data": f"correct:{confirmation_id}"}],
-            [{"text": "❌ Отмена", "callback_data": f"cancel:{confirmation_id}"}],
+            [{"text": "⬅️ Назад", "callback_data": f"cancel:{confirmation_id}"}],
         ),
     )
 
@@ -129,10 +130,12 @@ def render_tracking_card(summary: UserProductSummary) -> TelegramView:
         )
     rows.append([{"text": "📊 История", "callback_data": f"history:{subscription.id}"}])
     rows.append([action])
+    rows.append([{"text": "⬅️ Назад", "callback_data": "my"}])
 
+    state = "⏸ Отслеживание приостановлено" if subscription.status == "paused" else "✅ Отслеживание включено"
     return TelegramView(
         text=(
-            "✅ Отслеживание включено\n\n"
+            f"{state}\n\n"
             f"{summary.product.canonical_name}\n\n"
             f"{price_block}\n\n"
             "Проверка: примерно каждые 4 минуты"
@@ -153,7 +156,8 @@ def render_product_list(
         return TelegramView(
             text="📦 Пока ничего не отслеживается.",
             reply_markup=_inline_keyboard(
-                [{"text": "➕ Добавить товар", "callback_data": "add"}]
+                [{"text": "➕ Добавить товар", "callback_data": "add"}],
+                [{"text": "⬅️ Назад", "callback_data": "home"}],
             ),
         )
 
@@ -190,13 +194,89 @@ def render_product_list(
 
     nav: list[dict[str, str]] = []
     if current_page > 0:
-        nav.append({"text": "⬅️ Назад", "callback_data": f"my_page:{current_page - 1}"})
+        nav.append({"text": "⬅️", "callback_data": f"my_page:{current_page - 1}"})
     if current_page < last_page:
-        nav.append({"text": "Дальше ➡️", "callback_data": f"my_page:{current_page + 1}"})
+        nav.append({"text": "➡️", "callback_data": f"my_page:{current_page + 1}"})
     if nav:
         buttons.append(nav)
     buttons.append([{"text": "➕ Добавить товар", "callback_data": "add"}])
+    buttons.append([{"text": "⬅️ Назад", "callback_data": "home"}])
     return TelegramView(text="\n".join(lines).rstrip(), reply_markup={"inline_keyboard": buttons})
+
+
+def render_price_history(
+    summary: UserProductSummary,
+    prices: Sequence[tuple[Decimal | str | int, datetime]],
+    *,
+    page: int = 0,
+    page_size: int = 20,
+) -> TelegramView:
+    if page_size <= 0:
+        raise ValueError("page_size must be positive")
+
+    subscription_id = summary.subscription.id
+    ordered = sorted(
+        ((Decimal(str(price)), verified_at) for price, verified_at in prices),
+        key=lambda item: (item[0], item[1]),
+    )
+    rows: list[list[dict[str, str]]] = []
+
+    if not ordered:
+        rows.append([{"text": "⬅️ Назад", "callback_data": f"product:{subscription_id}"}])
+        return TelegramView(
+            text=(
+                f"📊 История цены — {summary.product.canonical_name}\n\n"
+                "Пока нет проверенных цен за последние 7 дней."
+            ),
+            reply_markup={"inline_keyboard": rows},
+        )
+
+    last_page = (len(ordered) - 1) // page_size
+    current_page = min(max(page, 0), last_page)
+    start = current_page * page_size
+    visible = ordered[start : start + page_size]
+
+    lines = [
+        f"📊 История цены — {summary.product.canonical_name}",
+        "",
+        "За последние 7 дней · от минимальной к максимальной",
+        f"Минимум: {_format_rub(ordered[0][0])}",
+        f"Максимум: {_format_rub(ordered[-1][0])}",
+    ]
+    if summary.public_price is not None:
+        lines.append(f"Сейчас: {_format_rub(summary.public_price)}")
+    lines.extend(("", "Проверенные цены:"))
+
+    for index, (price, verified_at) in enumerate(visible, start=start + 1):
+        lines.append(
+            f"{index}. {_format_rub(price)} — {verified_at.strftime('%d.%m.%Y %H:%M')}"
+        )
+
+    if last_page > 0:
+        lines.extend(("", f"Страница {current_page + 1}/{last_page + 1}"))
+        nav: list[dict[str, str]] = []
+        if current_page > 0:
+            nav.append(
+                {
+                    "text": "⬅️",
+                    "callback_data": f"history_page:{subscription_id}:{current_page - 1}",
+                }
+            )
+        if current_page < last_page:
+            nav.append(
+                {
+                    "text": "➡️",
+                    "callback_data": f"history_page:{subscription_id}:{current_page + 1}",
+                }
+            )
+        if nav:
+            rows.append(nav)
+
+    rows.append([{"text": "⬅️ Назад", "callback_data": f"product:{subscription_id}"}])
+    return TelegramView(
+        text="\n".join(lines),
+        reply_markup={"inline_keyboard": rows},
+    )
 
 
 def render_new_low(payload: Mapping[str, Any]) -> TelegramView:
@@ -235,7 +315,28 @@ def render_add_prompt() -> TelegramView:
         text=(
             "Напиши точное название товара одним сообщением.\n\n"
             "Например: Xiaomi Pad 7 8/256"
-        )
+        ),
+        reply_markup=_inline_keyboard(
+            [{"text": "⬅️ Назад", "callback_data": "home"}],
+        ),
+    )
+
+
+def render_correction_prompt() -> TelegramView:
+    return TelegramView(
+        text="Отправь исправленное название товара одним сообщением.",
+        reply_markup=_inline_keyboard(
+            [{"text": "⬅️ Назад", "callback_data": "home"}],
+        ),
+    )
+
+
+def render_cancelled() -> TelegramView:
+    return TelegramView(
+        text="Добавление товара отменено.",
+        reply_markup=_inline_keyboard(
+            [{"text": "🏠 На главную", "callback_data": "home"}],
+        ),
     )
 
 
@@ -243,5 +344,8 @@ def render_plan_error() -> TelegramView:
     return TelegramView(
         text=(
             "Не смог надёжно разобрать товар. Проверь название и характеристики и отправь ещё раз."
-        )
+        ),
+        reply_markup=_inline_keyboard(
+            [{"text": "⬅️ Назад", "callback_data": "home"}],
+        ),
     )
