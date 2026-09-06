@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -68,14 +69,44 @@ class FakeAdapter:
         )
 
 
+class ExactPriceAdapter(FakeAdapter):
+    def __init__(self, price: str) -> None:
+        super().__init__()
+        self.price = Decimal(price)
+
+    async def search(self, query, *, limit=50, page=1, category_path=None):
+        self.events.append(f"search:{query}")
+        return [candidate("new")]
+
+    async def fetch_offer(self, locator: OfferLocator) -> OfferSnapshot:
+        self.events.append(f"fetch:{locator.listing_id}")
+        self.fetch_counts[locator.listing_id] = self.fetch_counts.get(locator.listing_id, 0) + 1
+        return OfferSnapshot(
+            locator=locator,
+            title="Xiaomi Pad 7 8GB 256GB",
+            attributes={"model": "Pad 7", "ram": "8 GB", "storage": "256 GB"},
+            price=self.price,
+            available=True,
+            price_source="detail",
+        )
+
+
 class RateLimitedAdapter(FakeAdapter):
     async def search(self, query, *, limit=50, page=1, category_path=None):
         raise MarketplaceRateLimitedError("limited", retry_after_seconds=600)
 
 
 class FakeWorkerRepository:
-    def __init__(self, tracked: TrackedProductRecord) -> None:
+    def __init__(
+        self,
+        tracked: TrackedProductRecord,
+        *,
+        trusted_prices: tuple[Decimal, ...] = (Decimal("24990"),),
+        known: tuple[SearchCandidate, ...] | None = None,
+    ) -> None:
         self.tracked = tracked
+        self.trusted_prices = trusted_prices
+        self.known = (candidate("known"),) if known is None else known
         self.complete_calls: list[tuple[int, bool, int | None]] = []
         self.taxonomy_calls: list[str] = []
 
@@ -83,7 +114,10 @@ class FakeWorkerRepository:
         return (self.tracked,)
 
     async def list_known_candidates(self, product_id, marketplace):
-        return (candidate("known"),)
+        return self.known
+
+    async def list_trusted_price_reference(self, product_id, marketplace, *, since):
+        return self.trusted_prices
 
     async def complete_scan(
         self,
@@ -102,7 +136,13 @@ class FakeWorkerRepository:
 
 class FakeVerifiedStore:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, bool]] = []
+        self.trusted_calls: list[tuple[str, bool]] = []
+        self.quarantine_calls: list[str] = []
+        self.rejection_calls: list[str] = []
+
+    @property
+    def calls(self) -> list[tuple[str, bool]]:
+        return self.trusted_calls
 
     async def record_verified_offer(
         self,
@@ -113,7 +153,31 @@ class FakeVerifiedStore:
         verified_at,
         allow_alerts=True,
     ):
-        self.calls.append((candidate.listing_id, allow_alerts))
+        self.trusted_calls.append((candidate.listing_id, allow_alerts))
+        return None
+
+    async def record_quarantined_offer(
+        self,
+        product,
+        candidate,
+        snapshot,
+        decision,
+        *,
+        verified_at,
+    ):
+        self.quarantine_calls.append(candidate.listing_id)
+        return None
+
+    async def record_quality_rejection(
+        self,
+        product,
+        candidate,
+        snapshot,
+        decision,
+        *,
+        verified_at,
+    ):
+        self.rejection_calls.append(candidate.listing_id)
         return None
 
 
@@ -127,6 +191,12 @@ class FakeLearningStore:
 
     async def save_verified_update(self, scope_key, engine, evidence):
         self.saved += 1
+
+
+def completed_scan_record(caplog):
+    records = [record for record in caplog.records if record.message == "marketplace scan completed"]
+    assert len(records) == 1
+    return records[0].marketplace_scan_stats
 
 
 def test_worker_polls_known_listing_before_discovery_and_deduplicates_detail_fetch() -> None:
@@ -168,6 +238,57 @@ def test_worker_enables_alerts_after_product_has_successful_baseline_scan() -> N
 
     assert verified.calls
     assert all(allow_alerts is True for _, allow_alerts in verified.calls)
+
+
+def test_worker_quarantines_anomalous_exact_price_without_verified_write(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="pricewatch.worker")
+    repository = FakeWorkerRepository(
+        product(first_scan=False),
+        trusted_prices=(Decimal("19990"),),
+        known=(),
+    )
+    adapter = ExactPriceAdapter("827")
+    verified = FakeVerifiedStore()
+    worker = PriceWorker(
+        repository=repository,
+        verified_store=verified,
+        learning_store=FakeLearningStore(),
+        adapters={"wildberries": adapter},
+        worker_id="worker-1",
+    )
+
+    asyncio.run(worker.run_once(NOW))
+
+    assert verified.trusted_calls == []
+    assert verified.quarantine_calls == ["new"]
+    stats = completed_scan_record(caplog)
+    assert stats.quarantined_count == 1
+    assert stats.trusted_count == 0
+    assert stats.verified_count == 1
+    assert stats.reason_code_counts["price_outlier"] == 1
+
+
+def test_worker_sends_normal_exact_offer_to_existing_trusted_store() -> None:
+    repository = FakeWorkerRepository(
+        product(first_scan=False),
+        trusted_prices=(Decimal("19990"),),
+        known=(),
+    )
+    adapter = ExactPriceAdapter("19990")
+    verified = FakeVerifiedStore()
+    worker = PriceWorker(
+        repository=repository,
+        verified_store=verified,
+        learning_store=FakeLearningStore(),
+        adapters={"wildberries": adapter},
+        worker_id="worker-1",
+    )
+
+    asyncio.run(worker.run_once(NOW))
+
+    assert [listing_id for listing_id, _ in verified.trusted_calls] == ["new"]
+    assert verified.quarantine_calls == []
+    assert verified.rejection_calls == []
 
 
 def test_worker_uses_rate_limit_backoff_when_no_marketplace_scan_succeeds() -> None:
