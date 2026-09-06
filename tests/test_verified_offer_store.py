@@ -3,13 +3,17 @@ import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
+from pricewatch.adapters.ozon import parse_offer_payload
 from pricewatch.marketplaces import OfferLocator, OfferSnapshot, SearchCandidate
 from pricewatch.runtime_models import TrackedProductRecord
 from pricewatch.search_plan import SearchPlan
+from pricewatch.telegram_views import render_new_low
 from pricewatch.verified_store import VerifiedOfferStore
 
 NOW = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def product(*, first_scan: bool = False) -> TrackedProductRecord:
@@ -205,6 +209,51 @@ def test_new_low_payload_carries_exact_ozon_product_rating_and_reviews_url() -> 
     assert payload["rating"] == "4.8"
     assert payload["review_count"] == 12436
     assert payload["reviews_url"] == "https://www.ozon.ru/product/123/reviews/"
+
+
+def test_ozon_detail_rating_flows_through_outbox_into_telegram_view() -> None:
+    detail_payload = json.loads(
+        (FIXTURES / "ozon_detail_minimal.json").read_text(encoding="utf-8")
+    )
+    detail_payload["widgetStates"]["webReviewProductScore-999-default-1"] = json.dumps(
+        {"totalScore": 4.8, "reviewsCount": 12436}
+    )
+    locator = OfferLocator(
+        marketplace="ozon",
+        listing_id="123456789",
+        variation_id="123456789",
+        url="https://www.ozon.ru/product/123456789/",
+    )
+    verified_snapshot = parse_offer_payload(detail_payload, locator)
+    exact_candidate = SearchCandidate(
+        marketplace="ozon",
+        listing_id="123456789",
+        variation_id="123456789",
+        title=verified_snapshot.title,
+        url=locator.url,
+    )
+    connection = FakeConnection(
+        history=[(Decimal("39990"), NOW)],
+        subscribers=[(1, 111, 10)],
+    )
+    store = VerifiedOfferStore(FakeFactory(connection))
+
+    asyncio.run(
+        store.record_verified_offer(
+            product(),
+            exact_candidate,
+            verified_snapshot,
+            verified_at=NOW,
+        )
+    )
+
+    payload = _outbox_payload(connection)
+    view = render_new_low(payload)
+    assert "⭐ 4.8 · 12 436 отзывов" in view.text
+    assert view.reply_markup["inline_keyboard"][0][0]["url"] == locator.url
+    assert view.reply_markup["inline_keyboard"][1][0]["url"] == (
+        "https://www.ozon.ru/product/123456789/reviews/"
+    )
 
 
 def test_new_low_payload_omits_rating_fields_when_metadata_is_missing() -> None:
