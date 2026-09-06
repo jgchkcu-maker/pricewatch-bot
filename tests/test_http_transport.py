@@ -81,3 +81,38 @@ def test_fetcher_rejects_oversized_or_non_object_json() -> None:
         assert "object" in str(exc)
     else:
         raise AssertionError("top-level JSON arrays must fail")
+
+
+def test_fetcher_forwards_marketplace_request_headers() -> None:
+    seen_headers: dict[str, str] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers["user-agent"] = request.headers["user-agent"]
+        seen_headers["referer"] = request.headers["referer"]
+        seen_headers["accept-language"] = request.headers["accept-language"]
+        return httpx.Response(200, json={"products": []})
+
+    async def scenario() -> dict:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, follow_redirects=False) as client:
+            fetcher = HttpJsonFetcher(client)
+            return await fetcher.get_json(
+                SearchRequest(
+                    "https://example.test/search",
+                    {"query": "airpods"},
+                    headers={
+                        "User-Agent": "PriceWatch Browser Profile",
+                        "Referer": "https://example.test/",
+                        "Accept-Language": "ru-RU,ru;q=0.9",
+                    },
+                )
+            )
+
+    payload = asyncio.run(scenario())
+
+    assert payload == {"products": []}
+    assert seen_headers == {
+        "user-agent": "PriceWatch Browser Profile",
+        "referer": "https://example.test/",
+        "accept-language": "ru-RU,ru;q=0.9",
+    }
