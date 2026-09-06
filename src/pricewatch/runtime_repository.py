@@ -206,6 +206,41 @@ class RuntimeRepository:
     async def resume_subscription(self, subscription_id: int) -> None:
         await self.set_subscription_status(subscription_id, "active")
 
+    async def delete_subscription(self, *, user_id: int, subscription_id: int) -> None:
+        async with self._connection_factory() as connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM subscription
+                WHERE id = %s AND user_id = %s
+                RETURNING tracked_product_id
+                """,
+                (subscription_id, user_id),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                raise KeyError("subscription not found")
+
+            product_id = int(row[0])
+            await self._refresh_product_subscription_state(connection, product_id)
+            remaining_cursor = await connection.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM subscription
+                    WHERE tracked_product_id = %s
+                )
+                """,
+                (product_id,),
+            )
+            remaining_row = await remaining_cursor.fetchone()
+            has_remaining_subscriptions = bool(remaining_row and remaining_row[0])
+            if not has_remaining_subscriptions:
+                await connection.execute(
+                    "DELETE FROM price_event WHERE tracked_product_id = %s",
+                    (product_id,),
+                )
+            await connection.commit()
+
     async def list_user_products(self, user_id: int) -> tuple[UserProductSummary, ...]:
         async with self._connection_factory() as connection:
             cursor = await connection.execute(
@@ -325,7 +360,7 @@ class RuntimeRepository:
         return int(row[0]), str(row[1]), search_plan_from_payload(_json_object(row[2]))
 
     async def prune_price_events(self, *, now: datetime | None = None) -> int:
-        cutoff = (now or datetime.now(UTC)) - timedelta(days=7)
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=8)
         async with self._connection_factory() as connection:
             cursor = await connection.execute(
                 "DELETE FROM price_event WHERE verified_at < %s RETURNING id",
