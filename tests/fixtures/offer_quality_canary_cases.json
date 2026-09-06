@@ -1,0 +1,10 @@
+{
+  "trusted_prices": ["18990", "19990", "20990"],
+  "offers": [
+    {"listing_id": "1", "title": "AirPods Pro 3", "price": "19990", "available": true},
+    {"listing_id": "2", "title": "AirPods Pro 3", "price": "827", "available": true},
+    {"listing_id": "3", "title": "Чехол для AirPods Pro 3", "price": "799", "available": true},
+    {"listing_id": "4", "title": "AirPods Pro 3 копия 1:1", "price": "827", "available": true},
+    {"listing_id": "5", "title": "AirPods Pro 3", "price": "19990", "available": false}
+  ]
+}

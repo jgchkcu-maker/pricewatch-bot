@@ -1,0 +1,5 @@
+{
+  "widgetStates": {
+    "tileGridDesktop-1-default-1": "{\"items\":[{\"id\":\"3497076095\",\"sku\":3497076095,\"action\":{\"link\":\"/product/xiaomi-pad-7-8-256-3497076095/\"},\"mainState\":[{\"type\":\"priceV2\",\"priceV2\":{\"price\":[{\"text\":\"31 990 ₽\",\"textStyle\":\"PRICE\"},{\"text\":\"35 990 ₽\",\"textStyle\":\"ORIGINAL_PRICE\"}]}},{\"type\":\"textDS\",\"id\":\"name\",\"textDS\":{\"text\":\"Xiaomi Pad 7 8 ГБ 256 ГБ\",\"testInfo\":{\"automatizationId\":\"tile-name\"}}}]}]}"
+  }
+}

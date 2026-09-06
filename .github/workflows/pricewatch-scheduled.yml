@@ -1,0 +1,32 @@
+name: PriceWatch Scheduled Worker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: pricewatch-scheduled-worker
+  cancel-in-progress: false
+
+jobs:
+  pricewatch-scheduled:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      WORKER_ID: github-actions-${{ github.run_id }}
+      SCAN_INTERVAL_SECONDS: "240"
+      WORKER_BATCH_SIZE: "20"
+      LEASE_SECONDS: "180"
+      MARKETPLACE_TIMEOUT_SECONDS: "20"
+      OUTBOX_BATCH_SIZE: "50"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install .
+      - run: pricewatch-scheduled
