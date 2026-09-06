@@ -144,6 +144,29 @@ class TelegramClient:
             raise TelegramApiError("sendMessage result must be an object")
         return result
 
+    async def edit_message_text(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        *,
+        reply_markup: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not text.strip():
+            raise ValueError("text must not be empty")
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = dict(reply_markup)
+        result = await self._call("editMessageText", payload)
+        if not isinstance(result, dict):
+            raise TelegramApiError("editMessageText result must be an object")
+        return result
+
     async def answer_callback_query(
         self,
         callback_query_id: str,
