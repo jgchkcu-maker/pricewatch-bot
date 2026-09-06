@@ -249,11 +249,12 @@ def test_ozon_detail_rating_flows_through_outbox_into_telegram_view() -> None:
 
     payload = _outbox_payload(connection)
     view = render_new_low(payload)
-    assert "⭐ 4.8 · 12 436 отзывов" in view.text
+    assert "⭐ 4.8 · 12 436 отзывов" not in view.text
     assert view.reply_markup["inline_keyboard"][0][0]["url"] == locator.url
-    assert view.reply_markup["inline_keyboard"][1][0]["url"] == (
-        "https://www.ozon.ru/product/123456789/reviews/"
-    )
+    assert view.reply_markup["inline_keyboard"][1][0] == {
+        "text": "⭐ 4.8 · 12 436 отзывов",
+        "url": "https://www.ozon.ru/product/123456789/reviews/",
+    }
 
 
 def test_new_low_payload_omits_rating_fields_when_metadata_is_missing() -> None:
