@@ -266,6 +266,8 @@ class RuntimeRepository:
                       ON current_state.marketplace_listing_id = ml.id
                     WHERE ml.tracked_product_id = p.id
                       AND ml.active = TRUE
+                      AND ml.quality_status = 'trusted'
+                      AND current_state.quality_status = 'trusted'
                       AND current_state.public_price IS NOT NULL
                       AND current_state.available IS NOT FALSE
                     ORDER BY current_state.public_price ASC,
@@ -276,6 +278,7 @@ class RuntimeRepository:
                     SELECT MIN(pe.public_price) AS seven_day_min_price
                     FROM price_event pe
                     WHERE pe.tracked_product_id = p.id
+                      AND pe.quality_status = 'trusted'
                       AND pe.public_price IS NOT NULL
                       AND pe.verified_at >= NOW() - INTERVAL '7 days'
                 ) rolling ON TRUE
@@ -419,6 +422,7 @@ class RuntimeRepository:
                 SELECT public_price, verified_at
                 FROM price_event
                 WHERE tracked_product_id = %s
+                  AND quality_status = 'trusted'
                   AND public_price IS NOT NULL
                   AND verified_at >= %s
                 ORDER BY verified_at ASC
