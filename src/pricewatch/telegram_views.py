@@ -240,9 +240,21 @@ def render_price_history(
         raise ValueError("page_size must be positive")
 
     subscription_id = summary.subscription.id
+    grouped: dict[Decimal, tuple[datetime, datetime]] = {}
+    for raw_price, verified_at in prices:
+        price = Decimal(str(raw_price))
+        previous = grouped.get(price)
+        if previous is None:
+            grouped[price] = (verified_at, verified_at)
+            continue
+        grouped[price] = (
+            min(previous[0], verified_at),
+            max(previous[1], verified_at),
+        )
+
     ordered = sorted(
-        ((Decimal(str(price)), verified_at) for price, verified_at in prices),
-        key=lambda item: (item[0], item[1]),
+        ((price, first_seen, last_seen) for price, (first_seen, last_seen) in grouped.items()),
+        key=lambda item: item[0],
     )
     rows: list[list[dict[str, str]]] = []
 
@@ -272,10 +284,13 @@ def render_price_history(
         lines.append(f"Сейчас: {_format_rub(summary.public_price)}")
     lines.extend(("", "Проверенные цены:"))
 
-    for index, (price, verified_at) in enumerate(visible, start=start + 1):
-        lines.append(
-            f"{index}. {_format_rub(price)} — {verified_at.strftime('%d.%m.%Y %H:%M')}"
-        )
+    for index, (price, first_seen, last_seen) in enumerate(visible, start=start + 1):
+        lines.append(f"{index}. {_format_rub(price)}")
+        if first_seen == last_seen:
+            lines.append(f"   зафиксировано: {first_seen.strftime('%d.%m.%Y %H:%M')}")
+        else:
+            lines.append(f"   впервые: {first_seen.strftime('%d.%m.%Y %H:%M')}")
+            lines.append(f"   последний раз: {last_seen.strftime('%d.%m.%Y %H:%M')}")
 
     if last_page > 0:
         lines.extend(("", f"Страница {current_page + 1}/{last_page + 1}"))
