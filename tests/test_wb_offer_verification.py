@@ -42,6 +42,22 @@ def test_parse_offer_payload_selects_exact_variation_and_card_price() -> None:
     assert snapshot.price_source == "card"
 
 
+def test_parse_offer_payload_uses_product_rating_not_supplier_rating() -> None:
+    locator = OfferLocator(
+        marketplace="wildberries",
+        listing_id="123456789",
+        seller_id="4242",
+        variation_id="987654",
+        url="https://www.wildberries.ru/catalog/123456789/detail.aspx",
+    )
+
+    snapshot = parse_offer_payload(fixture("wb_card_minimal.json"), locator)
+
+    assert snapshot.rating == Decimal("4.8")
+    assert snapshot.review_count == 12436
+    assert snapshot.rating != Decimal("3.1")
+
+
 def test_wb_adapter_fetch_offer_builds_card_v4_request() -> None:
     fetcher = RecordingFetcher(fixture("wb_card_minimal.json"))
     adapter = WildberriesSearchAdapter(fetcher, dest="-1257786")
