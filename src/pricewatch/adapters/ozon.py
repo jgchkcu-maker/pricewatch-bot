@@ -18,6 +18,16 @@ from pricewatch.marketplaces import (
 
 _OZON_ORIGIN = "https://www.ozon.ru"
 _OZON_COMPOSER_URL = f"{_OZON_ORIGIN}/api/composer-api.bx/page/json/v2"
+_OZON_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": f"{_OZON_ORIGIN}/",
+}
 
 
 def _parse_rub_price(value: object) -> Decimal | None:
@@ -401,7 +411,11 @@ class OzonSearchAdapter:
             raise ValueError("page must be positive")
 
         inner_path = _scoped_search_path(query, page, category_path)
-        request = SearchRequest(url=self._composer_url, params={"url": inner_path})
+        request = SearchRequest(
+            url=self._composer_url,
+            params={"url": inner_path},
+            headers=_OZON_HEADERS,
+        )
         payload = await self._fetcher.get_json(request)
         return parse_search_payload(payload)[:limit]
 
@@ -415,6 +429,7 @@ class OzonSearchAdapter:
         request = SearchRequest(
             url=self._composer_url,
             params={"url": f"/product/{sku}/"},
+            headers=_OZON_HEADERS,
         )
         payload = await self._fetcher.get_json(request)
         return parse_offer_payload(payload, locator)
