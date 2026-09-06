@@ -65,11 +65,15 @@ class FakeProvider:
 class FakeRepository:
     def __init__(self) -> None:
         self.summary = _summary()
+        self.deleted = False
+        self.delete_calls: list[tuple[int, int]] = []
 
     async def ensure_user(self, *, telegram_user_id, chat_id):
         return 11
 
     async def list_user_products(self, user_id):
+        if self.deleted:
+            return ()
         return (self.summary,)
 
     async def recent_public_prices(self, product_id, *, since):
@@ -86,6 +90,10 @@ class FakeRepository:
 
     async def resume_subscription(self, subscription_id):
         return None
+
+    async def delete_subscription(self, *, user_id, subscription_id):
+        self.delete_calls.append((user_id, subscription_id))
+        self.deleted = True
 
 
 class FakeTelegram:
@@ -127,9 +135,12 @@ def _callback_values(view):
     ]
 
 
-def _app(telegram: FakeTelegram) -> TelegramBotApp:
+def _app(
+    telegram: FakeTelegram,
+    repository: FakeRepository | None = None,
+) -> TelegramBotApp:
     return TelegramBotApp(
-        repository=FakeRepository(),
+        repository=repository or FakeRepository(),
         plan_provider=FakeProvider(),
         telegram=telegram,
     )
@@ -171,6 +182,39 @@ def test_nested_views_have_back_navigation() -> None:
     assert "home" in _callback_values(render_add_prompt())
     assert "home" in _callback_values(render_product_list((_summary(),)))
     assert "my" in _callback_values(render_tracking_card(_summary()))
+
+
+def test_tracking_card_has_delete_action() -> None:
+    assert "delete:7" in _callback_values(render_tracking_card(_summary()))
+
+
+def test_delete_requires_confirmation_in_same_message() -> None:
+    telegram = FakeTelegram()
+    repository = FakeRepository()
+    app = _app(telegram, repository)
+
+    asyncio.run(app.handle_update(_callback("delete:7", message_id=55)))
+
+    assert repository.delete_calls == []
+    assert telegram.sent == []
+    assert telegram.edited[-1][0:2] == (2002, 55)
+    assert "Удалить Apple AirPods Pro 3" in telegram.edited[-1][2]
+    markup = str(telegram.edited[-1][3])
+    assert "delete_confirm:7" in markup
+    assert "product:7" in markup
+
+
+def test_confirmed_delete_removes_subscription_and_returns_to_products() -> None:
+    telegram = FakeTelegram()
+    repository = FakeRepository()
+    app = _app(telegram, repository)
+
+    asyncio.run(app.handle_update(_callback("delete_confirm:7", message_id=55)))
+
+    assert repository.delete_calls == [(11, 7)]
+    assert telegram.sent == []
+    assert telegram.edited[-1][0:2] == (2002, 55)
+    assert "Пока ничего не отслеживается" in telegram.edited[-1][2]
 
 
 def test_telegram_client_supports_edit_message_text() -> None:
