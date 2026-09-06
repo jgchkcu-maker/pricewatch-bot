@@ -11,6 +11,7 @@ from pricewatch.search_plan import SearchPlan
 from pricewatch.telegram_api import TelegramClient
 from pricewatch.telegram_views import (
     render_add_prompt,
+    render_price_history,
     render_product_list,
     render_tracking_card,
 )
@@ -176,6 +177,22 @@ def test_history_shows_timestamped_prices_sorted_from_min_to_max() -> None:
     assert "06.09.2026" in text
     assert ":" in text
     assert "product:7" in str(telegram.edited[-1][3])
+
+
+def test_history_groups_repeated_prices_into_one_level() -> None:
+    prices = [
+        (17990, NOW - timedelta(days=2)),
+        (17990, NOW - timedelta(days=1)),
+        (17990, NOW - timedelta(hours=1)),
+        (18490, NOW - timedelta(hours=3)),
+    ]
+
+    view = render_price_history(_summary(), prices)
+
+    assert view.text.count("17 990 ₽") == 2  # minimum summary + one price level
+    assert "впервые: 04.09.2026 07:30" in view.text
+    assert "последний раз: 06.09.2026 06:30" in view.text
+    assert view.text.count("18 490 ₽") == 2  # current summary + one price level
 
 
 def test_nested_views_have_back_navigation() -> None:
