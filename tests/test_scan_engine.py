@@ -10,6 +10,7 @@ from pricewatch.match_learning import (
 from pricewatch.scan import scan_once
 from pricewatch.search_plan import SearchPlan
 from pricewatch.taxonomy import MarketplaceTaxonomy, TaxonomyObservationAccumulator
+from pricewatch.transport import MarketplaceRateLimitedError
 
 
 class FakeSearchAdapter:
@@ -80,6 +81,52 @@ class FakeOzonSearchAdapter:
         return []
 
 
+class RateLimitedSecondQueryAdapter(FakeSearchAdapter):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+        category_path: str | None = None,
+    ) -> list[SearchCandidate]:
+        self.calls += 1
+        if self.calls == 2:
+            raise MarketplaceRateLimitedError("burst limited", retry_after_seconds=600)
+        return await super().search(
+            query,
+            limit=limit,
+            page=page,
+            category_path=category_path,
+        )
+
+
+class SingleQueryBudgetAdapter(FakeSearchAdapter):
+    max_search_queries_per_scan = 1
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        page: int = 1,
+        category_path: str | None = None,
+    ) -> list[SearchCandidate]:
+        self.queries.append(query)
+        return await super().search(
+            query,
+            limit=limit,
+            page=page,
+            category_path=category_path,
+        )
+
+
 def make_plan(*, product_type: str = "tablet") -> SearchPlan:
     return SearchPlan(
         canonical_name="Xiaomi Pad 7 8/256",
@@ -117,6 +164,27 @@ def test_scan_keeps_primary_and_adds_rotating_alias_without_duplicate_offers() -
     assert len(outcome.ambiguous) == 1
     assert outcome.rejected_count == 1
     assert outcome.taxonomy_rejected_count == 1
+
+
+def test_scan_preserves_successful_primary_results_if_later_alias_is_rate_limited() -> None:
+    adapter = RateLimitedSecondQueryAdapter()
+
+    outcome = asyncio.run(scan_once(make_plan(), adapter, cycle=1))
+
+    assert adapter.calls == 2
+    assert outcome.queries == ("xiaomi pad 7 8 256",)
+    assert [(item.listing_id, item.variation_id) for item in outcome.accepted] == [("1", "11")]
+    assert len(outcome.ambiguous) == 1
+
+
+def test_scan_respects_marketplace_single_query_budget_without_losing_alias_rotation() -> None:
+    adapter = SingleQueryBudgetAdapter()
+
+    outcome = asyncio.run(scan_once(make_plan(), adapter, cycle=1))
+
+    assert adapter.queries == ["xiaomi pad7 8 256"]
+    assert outcome.queries == ("xiaomi pad7 8 256",)
+    assert len(outcome.accepted) == 1
 
 
 def test_scan_passes_known_ozon_category_scope_to_adapter() -> None:
