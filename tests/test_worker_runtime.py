@@ -194,7 +194,11 @@ class FakeLearningStore:
 
 
 def completed_scan_record(caplog):
-    records = [record for record in caplog.records if record.message == "marketplace scan completed"]
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "marketplace scan completed"
+    ]
     assert len(records) == 1
     return records[0].marketplace_scan_stats
 
