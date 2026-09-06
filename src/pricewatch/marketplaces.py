@@ -63,6 +63,8 @@ class OfferSnapshot:
     original_price: Decimal | None = None
     conditional_prices: Mapping[str, Decimal] = field(default_factory=dict)
     price_source: str = "offer"
+    rating: Decimal | None = None
+    review_count: int | None = None
 
 
 class MarketplaceSearchAdapter(Protocol):
