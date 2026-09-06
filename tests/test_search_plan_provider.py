@@ -24,6 +24,7 @@ def valid_plan_json() -> str:
             "canonical_name": "Xiaomi Pad 7 8/256",
             "product_type": "tablet",
             "primary_query": "xiaomi pad 7 8 256",
+            "condition": "new",
             "aliases": ["xiaomi pad7 8 256"],
             "required_tokens": ["xiaomi"],
             "excluded_terms": ["pad 7 pro", "чехол"],
@@ -44,6 +45,7 @@ def exact_identifier_plan_json() -> str:
             "canonical_name": "Example Product",
             "product_type": "device",
             "primary_query": "example product",
+            "condition": "new",
             "aliases": [],
             "required_tokens": ["example"],
             "excluded_terms": [],
@@ -71,6 +73,7 @@ def test_gemini_provider_uses_system_instruction_json_mode_and_parses_plan() -> 
     asyncio.run(client.aclose())
 
     assert plan.identity_attributes["storage"] == "256 gb"
+    assert plan.condition == "new"
     assert "gemini-3.5-flash-lite:generateContent" in str(captured["url"])
     assert captured["key"] == "secret"
     payload = captured["payload"]
@@ -171,6 +174,7 @@ def test_gemini_provider_keeps_strict_search_plan_payload_validation() -> None:
             "canonical_name": "Xiaomi Pad 7",
             "product_type": "tablet",
             "primary_query": "xiaomi pad 7",
+            "condition": "new",
             "aliases": [],
             "required_tokens": [],
             "excluded_terms": [],
@@ -190,6 +194,24 @@ def test_gemini_provider_keeps_strict_search_plan_payload_validation() -> None:
         assert "unexpected keys" in str(exc)
     else:
         raise AssertionError("strict SearchPlan validation must remain authoritative")
+    asyncio.run(client.aclose())
+
+
+def test_gemini_provider_rejects_invalid_condition() -> None:
+    invalid = json.loads(valid_plan_json())
+    invalid["condition"] = "open box"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=response_payload(json.dumps(invalid)))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiSearchPlanProvider(api_key="secret", client=client)
+    try:
+        asyncio.run(provider.create_plan("Xiaomi Pad 7"))
+    except SearchPlanPayloadError as exc:
+        assert "condition" in str(exc).lower()
+    else:
+        raise AssertionError("invalid condition must fail closed")
     asyncio.run(client.aclose())
 
 
