@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import httpx
 
@@ -89,3 +90,17 @@ def test_malformed_success_payload_fails_closed() -> None:
     else:
         raise AssertionError("ok=false must fail")
     asyncio.run(http.aclose())
+
+
+def test_telegram_client_redacts_token_from_httpx_logs(caplog) -> None:
+    token = "987654:super-secret-token"
+    TelegramClient(token=token, client=object())
+
+    with caplog.at_level(logging.INFO, logger="httpx"):
+        logging.getLogger("httpx").info(
+            'HTTP Request: POST https://api.telegram.org/bot%s/getUpdates "HTTP/1.1 200 OK"',
+            token,
+        )
+
+    assert token not in caplog.text
+    assert "[REDACTED]" in caplog.text
