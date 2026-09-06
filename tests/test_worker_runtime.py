@@ -183,3 +183,18 @@ def test_worker_uses_rate_limit_backoff_when_no_marketplace_scan_succeeds() -> N
     asyncio.run(worker.run_once(NOW))
 
     assert repository.complete_calls == [(42, False, 600)]
+
+
+def test_worker_caps_failed_first_scan_backoff_to_five_minutes() -> None:
+    repository = FakeWorkerRepository(product(first_scan=True))
+    worker = PriceWorker(
+        repository=repository,
+        verified_store=FakeVerifiedStore(),
+        learning_store=FakeLearningStore(),
+        adapters={"wildberries": RateLimitedAdapter()},
+        worker_id="worker-1",
+    )
+
+    asyncio.run(worker.run_once(NOW))
+
+    assert repository.complete_calls == [(42, False, 300)]
