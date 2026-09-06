@@ -8,7 +8,7 @@ import httpx
 
 from pricewatch.adapters.ozon import OzonSearchAdapter
 from pricewatch.adapters.wildberries import WildberriesSearchAdapter
-from pricewatch.bootstrap import apply_sql_file
+from pricewatch.bootstrap import apply_runtime_schema
 from pricewatch.config import Settings
 from pricewatch.db import PsycopgConnectionFactory
 from pricewatch.learning_persistence import PostgresLearningStateStore
@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 async def run_worker(settings: Settings, *, bootstrap_schema: bool = True) -> None:
     connection_factory = PsycopgConnectionFactory(settings.database_url)
     if bootstrap_schema:
-        await apply_sql_file(connection_factory, "sql/001_runtime.sql")
+        await apply_runtime_schema(connection_factory)
     learning_store = PostgresLearningStateStore(connection_factory)
     await learning_store.initialize()
 
