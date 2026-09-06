@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from pricewatch.runtime_models import UserProductSummary
@@ -32,6 +32,36 @@ def _marketplace_name(value: str | None) -> str:
     if value is None:
         return ""
     return names.get(value.casefold(), value)
+
+
+def _rating_review_link(payload: Mapping[str, Any]) -> tuple[str, str] | None:
+    try:
+        rating = Decimal(str(payload.get("rating", "")).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    if not (Decimal("0") < rating <= Decimal("5")):
+        return None
+
+    raw_count = payload.get("review_count")
+    if isinstance(raw_count, bool):
+        return None
+    if isinstance(raw_count, int):
+        review_count = raw_count
+    elif isinstance(raw_count, str) and raw_count.strip().isdigit():
+        review_count = int(raw_count.strip())
+    else:
+        return None
+    if review_count <= 0:
+        return None
+
+    raw_url = payload.get("reviews_url")
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        return None
+    reviews_url = raw_url.strip()
+
+    rating_text = format(rating.normalize(), "f")
+    count_text = f"{review_count:,}".replace(",", " ")
+    return f"⭐ {rating_text} · {count_text} отзывов", reviews_url
 
 
 def _human_attribute_value(key: str, value: str) -> str:
@@ -334,6 +364,15 @@ def render_new_low(payload: Mapping[str, Any]) -> TelegramView:
         if card_price is not None:
             extra_price = f"\nПо Ozon Карте: {_format_rub(str(card_price))}\n"
 
+    rating_link = _rating_review_link(payload)
+    rating_block = f"\n{rating_link[0]}\n" if rating_link is not None else ""
+    buttons: list[list[dict[str, str]]] = [
+        [{"text": "🛒 Открыть товар", "url": url}]
+    ]
+    if rating_link is not None:
+        label, reviews_url = rating_link
+        buttons.append([{"text": label, "url": reviews_url}])
+
     return TelegramView(
         text=(
             "🔥 НОВАЯ МИНИМАЛЬНАЯ ЦЕНА\n\n"
@@ -341,12 +380,11 @@ def render_new_low(payload: Mapping[str, Any]) -> TelegramView:
             f"{price} • {marketplace}\n"
             f"{extra_price}\n"
             f"Было минимум: {previous}\n"
-            f"Снижение: {delta} · {percent}%\n\n"
+            f"Снижение: {delta} · {percent}%\n"
+            f"{rating_block}\n"
             "Цена проверена на карточке товара только что."
         ),
-        reply_markup=_inline_keyboard(
-            [{"text": "🛒 Открыть товар", "url": url}],
-        ),
+        reply_markup={"inline_keyboard": buttons},
     )
 
 
