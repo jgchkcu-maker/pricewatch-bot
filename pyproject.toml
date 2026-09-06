@@ -16,6 +16,7 @@ dependencies = [
 pricewatch-bot = "pricewatch.main_bot:main"
 pricewatch-worker = "pricewatch.main_worker:main"
 pricewatch-scheduled = "pricewatch.main_scheduled:main"
+pricewatch-railway = "pricewatch.main_railway:main"
 
 [project.optional-dependencies]
 dev = [
