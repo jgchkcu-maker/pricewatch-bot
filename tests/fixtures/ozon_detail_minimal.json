@@ -1,11 +1,13 @@
 {
   "widgetStates": {
-    "webGallery-100-default-1": "{\"sku\":\"123456789\",\"isUnavailable\":false}",
+    "webGallery-100-default-1": "{\"sku\":\"123456789\",\"isUnavailable\":false,\"coverImage\":\"https://cdn.example.test/cover.jpg\",\"images\":[{\"src\":\"https://cdn.example.test/1.jpg\"},{\"src\":\"https://cdn.example.test/2.jpg\"}]}",
     "webProductHeading-101-default-1": "{\"title\":\"Xiaomi Планшет Pad 7 8 ГБ 256 ГБ\"}",
     "webPrice-102-default-1": "{\"isAvailable\":true,\"cardPrice\":\"29 490 ₽\",\"price\":\"30 990 ₽\",\"originalPrice\":\"35 990 ₽\"}",
     "webSale-103-default-1": "{\"offer\":{\"isAvailable\":true}}",
     "webAddToCart-104-default-1": "{\"firstButton\":{\"sku\":\"123456789\"},\"secondButton\":{\"sku\":\"123456789\"}}",
     "webShortCharacteristics-105-default-1": "{\"characteristics\":[{\"title\":{\"textRs\":[{\"content\":\"Модель\"}]},\"values\":[{\"text\":\"Pad 7\"}]},{\"title\":{\"textRs\":[{\"content\":\"Оперативная память\"}]},\"values\":[{\"text\":\"8 ГБ\"}]},{\"title\":{\"textRs\":[{\"content\":\"Встроенная память\"}]},\"values\":[{\"text\":\"256 ГБ\"}]}]}",
-    "webCurrentSeller-106-default-1": "{\"sellerCell\":{\"centerBlock\":{\"title\":{\"text\":\"Example Store\"}}}}"
+    "webCurrentSeller-106-default-1": "{\"sellerCell\":{\"centerBlock\":{\"title\":{\"text\":\"Example Store\"}}},\"rating\":{\"title\":{\"text\":\"4,7\"}}}",
+    "webReviewProductScore-107-default-1": "{\"totalScore\":4.9,\"reviewsCount\":731}",
+    "labelListV2-108-default-1": "{\"items\":[{\"title\":{\"text\":\"Оригинал\"}},{\"title\":{\"text\":\"Хит\"}}]}"
   }
 }

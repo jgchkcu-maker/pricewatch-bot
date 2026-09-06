@@ -7,6 +7,7 @@ import pytest
 
 from pricewatch.adapters.ozon import OzonSearchAdapter, parse_offer_payload
 from pricewatch.marketplaces import (
+    OfferCondition,
     OfferIdentityError,
     OfferLocator,
     ParserDriftError,
@@ -53,30 +54,44 @@ def test_parse_ozon_offer_uses_public_price_and_keeps_card_price_conditional() -
     assert "256 ГБ" in snapshot.attributes.values()
 
 
-def test_ozon_offer_reads_product_rating_widget() -> None:
-    payload = fixture("ozon_detail_minimal.json")
-    payload["widgetStates"]["webReviewProductScore-999-default-1"] = json.dumps(
-        {"totalScore": 4.9, "reviewsCount": 731}
-    )
+def test_ozon_offer_extracts_optional_quality_signals() -> None:
+    snapshot = parse_offer_payload(fixture("ozon_detail_minimal.json"), locator())
 
-    snapshot = parse_offer_payload(payload, locator())
+    assert snapshot.quality_signals.seller_name == "Example Store"
+    assert snapshot.quality_signals.seller_rating == Decimal("4.7")
+    assert snapshot.quality_signals.seller_review_count is None
+    assert snapshot.quality_signals.condition is OfferCondition.UNKNOWN
+    assert snapshot.quality_signals.authenticity_badges == ("оригинал",)
+    assert snapshot.quality_signals.identifiers == {}
+    assert snapshot.quality_signals.image_count == 3
+
+
+def test_ozon_offer_reads_product_rating_widget() -> None:
+    snapshot = parse_offer_payload(fixture("ozon_detail_minimal.json"), locator())
 
     assert snapshot.rating == Decimal("4.9")
     assert snapshot.review_count == 731
 
 
-def test_ozon_missing_or_malformed_rating_metadata_does_not_block_price() -> None:
-    missing = parse_offer_payload(fixture("ozon_detail_minimal.json"), locator())
-    assert missing.rating is None
-    assert missing.review_count is None
-    assert missing.price == Decimal("30990")
-
+def test_ozon_missing_or_malformed_optional_metadata_does_not_block_price() -> None:
     payload = fixture("ozon_detail_minimal.json")
-    payload["widgetStates"]["webReviewProductScore-999-default-1"] = "not-json"
-    malformed = parse_offer_payload(payload, locator())
-    assert malformed.rating is None
-    assert malformed.review_count is None
-    assert malformed.price == Decimal("30990")
+    del payload["widgetStates"]["webCurrentSeller-106-default-1"]
+    del payload["widgetStates"]["webReviewProductScore-107-default-1"]
+    del payload["widgetStates"]["labelListV2-108-default-1"]
+    payload["widgetStates"]["webCurrentSeller-999-default-1"] = "not-json"
+    payload["widgetStates"]["labelListV2-999-default-1"] = "not-json"
+
+    snapshot = parse_offer_payload(payload, locator())
+
+    assert snapshot.locator == locator()
+    assert snapshot.price == Decimal("30990")
+    assert snapshot.available is True
+    assert snapshot.rating is None
+    assert snapshot.review_count is None
+    assert snapshot.quality_signals.seller_name is None
+    assert snapshot.quality_signals.seller_rating is None
+    assert snapshot.quality_signals.authenticity_badges == ()
+    assert snapshot.quality_signals.condition is OfferCondition.UNKNOWN
 
 
 def test_ozon_offer_rejects_sku_mismatch() -> None:
