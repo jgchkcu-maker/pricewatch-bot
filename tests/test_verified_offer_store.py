@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -46,7 +47,12 @@ def candidate() -> SearchCandidate:
     )
 
 
-def snapshot(price: str) -> OfferSnapshot:
+def snapshot(
+    price: str,
+    *,
+    rating: str | None = None,
+    review_count: int | None = None,
+) -> OfferSnapshot:
     return OfferSnapshot(
         locator=OfferLocator(
             marketplace="ozon",
@@ -59,6 +65,8 @@ def snapshot(price: str) -> OfferSnapshot:
         available=True,
         conditional_prices={"ozon_card": Decimal("23990")},
         price_source="detail",
+        rating=Decimal(rating) if rating is not None else None,
+        review_count=review_count,
     )
 
 
@@ -116,6 +124,17 @@ class FakeFactory:
         yield self.connection
 
 
+def _outbox_payload(connection: FakeConnection) -> dict[str, object]:
+    calls = [
+        params
+        for query, params in connection.calls
+        if "insert into notification_outbox" in query.lower()
+    ]
+    assert len(calls) == 1
+    assert calls[0] is not None
+    return json.loads(str(calls[0][-1]))
+
+
 def test_first_scan_records_baseline_but_suppresses_new_low_outbox() -> None:
     connection = FakeConnection(history=[(Decimal("29490"), NOW)])
     store = VerifiedOfferStore(FakeFactory(connection))
@@ -164,6 +183,93 @@ def test_new_verified_low_creates_one_deduped_outbox_row_per_active_subscriber()
     assert result.outbox_count == 2
     assert len(outbox_calls) == 2
     assert all("on conflict (dedup_key) do nothing" in query.lower() for query, _ in outbox_calls)
+
+
+def test_new_low_payload_carries_exact_ozon_product_rating_and_reviews_url() -> None:
+    connection = FakeConnection(
+        history=[(Decimal("29490"), NOW)],
+        subscribers=[(1, 111, 10)],
+    )
+    store = VerifiedOfferStore(FakeFactory(connection))
+
+    asyncio.run(
+        store.record_verified_offer(
+            product(),
+            candidate(),
+            snapshot("24990", rating="4.8", review_count=12436),
+            verified_at=NOW,
+        )
+    )
+
+    payload = _outbox_payload(connection)
+    assert payload["rating"] == "4.8"
+    assert payload["review_count"] == 12436
+    assert payload["reviews_url"] == "https://www.ozon.ru/product/123/reviews/"
+
+
+def test_new_low_payload_omits_rating_fields_when_metadata_is_missing() -> None:
+    connection = FakeConnection(
+        history=[(Decimal("29490"), NOW)],
+        subscribers=[(1, 111, 10)],
+    )
+    store = VerifiedOfferStore(FakeFactory(connection))
+
+    asyncio.run(
+        store.record_verified_offer(
+            product(),
+            candidate(),
+            snapshot("24990"),
+            verified_at=NOW,
+        )
+    )
+
+    payload = _outbox_payload(connection)
+    assert "rating" not in payload
+    assert "review_count" not in payload
+    assert "reviews_url" not in payload
+
+
+def test_new_low_payload_uses_exact_wildberries_product_reviews_url() -> None:
+    wb_candidate = SearchCandidate(
+        marketplace="wildberries",
+        listing_id="123456789",
+        variation_id="987654",
+        title="Xiaomi Pad 7 8GB 256GB",
+        url="https://www.wildberries.ru/catalog/123456789/detail.aspx",
+    )
+    wb_snapshot = OfferSnapshot(
+        locator=OfferLocator(
+            marketplace="wildberries",
+            listing_id="123456789",
+            variation_id="987654",
+            url="https://www.wildberries.ru/catalog/123456789/detail.aspx",
+        ),
+        title="Xiaomi Pad 7 8GB 256GB",
+        price=Decimal("24990"),
+        available=True,
+        price_source="card",
+        rating=Decimal("4.9"),
+        review_count=731,
+    )
+    connection = FakeConnection(
+        history=[(Decimal("29490"), NOW)],
+        subscribers=[(1, 111, 10)],
+    )
+    store = VerifiedOfferStore(FakeFactory(connection))
+
+    asyncio.run(
+        store.record_verified_offer(
+            product(),
+            wb_candidate,
+            wb_snapshot,
+            verified_at=NOW,
+        )
+    )
+
+    payload = _outbox_payload(connection)
+    assert payload["reviews_url"] == (
+        "https://www.wildberries.ru/catalog/123456789/feedbacks"
+    )
 
 
 def test_unchanged_verified_state_updates_freshness_without_duplicate_price_event() -> None:
