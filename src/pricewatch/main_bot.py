@@ -18,9 +18,10 @@ from pricewatch.telegram_api import TelegramApiError, TelegramClient
 LOGGER = logging.getLogger(__name__)
 
 
-async def run_bot(settings: Settings) -> None:
+async def run_bot(settings: Settings, *, bootstrap_schema: bool = True) -> None:
     connection_factory = PsycopgConnectionFactory(settings.database_url)
-    await apply_sql_file(connection_factory, "sql/001_runtime.sql")
+    if bootstrap_schema:
+        await apply_sql_file(connection_factory, "sql/001_runtime.sql")
 
     async with httpx.AsyncClient(timeout=40.0) as http:
         telegram = TelegramClient(token=settings.telegram_bot_token, client=http)
